@@ -14,7 +14,7 @@ DATA_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__
 DOCS_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "documents")
 
 def get_embedding_function():
-    return OllamaEmbeddings(model="llama3")
+    return OllamaEmbeddings(model="gemma2:2b")
 
 def get_vector_store():
     return Chroma(

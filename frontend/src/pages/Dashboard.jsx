@@ -40,6 +40,21 @@ const Dashboard = () => {
         }
     };
 
+    const handleBulkInject = async (file) => {
+        try {
+            const formData = new FormData();
+            formData.append('file', file);
+
+            await fetch('http://localhost:8000/api/ingest/bulk', {
+                method: 'POST',
+                body: formData
+            });
+            fetchData(); // Immediate refresh
+        } catch (e) {
+            console.error("Bulk injection failed:", e);
+        }
+    };
+
     useEffect(() => {
         fetchData();
         const interval = setInterval(fetchData, 2000);
@@ -66,7 +81,7 @@ const Dashboard = () => {
                     <RecentEmails emails={emails} />
                 </div>
                 <div className="lg:col-span-1">
-                    <SimulationBox onInject={handleInject} />
+                    <SimulationBox onInject={handleInject} onBulkInject={handleBulkInject} />
                 </div>
             </div>
         </div>

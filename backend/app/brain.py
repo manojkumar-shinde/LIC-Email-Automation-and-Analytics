@@ -10,7 +10,7 @@ from app.rag import get_retriever
 logger = logging.getLogger("Brain")
 
 # Initialize LLM
-llm = ChatOllama(model="llama3", format="json")
+llm = ChatOllama(model="gemma2:2b", format="json")
 
 # Define Prompt
 template = """

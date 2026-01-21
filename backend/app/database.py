@@ -17,7 +17,7 @@ def init_db():
     conn = get_db_connection()
     c = conn.cursor()
     # Dropping table for "Start from Scratch" requirement to ensuring fresh schema
-    c.execute("DROP TABLE IF EXISTS emails")
+    # c.execute("DROP TABLE IF EXISTS emails")
     
     c.execute('''
         CREATE TABLE IF NOT EXISTS emails (
@@ -51,6 +51,42 @@ def save_email(google_id: str, sender: str, subject: str, body: str, received_at
         return True
     except sqlite3.IntegrityError:
         return False
+    finally:
+        conn.close()
+
+def bulk_save_emails(emails: List[Dict[str, Any]]) -> int:
+    """
+    Save multiple emails to the database.
+    Expects list of dicts with: google_id, sender, subject, body, received_at
+    Returns number of emails successfully saved.
+    """
+    conn = get_db_connection()
+    c = conn.cursor()
+    
+    # Prepare data tuples
+    data = []
+    now = datetime.now()
+    for e in emails:
+        data.append((
+            e['google_id'],
+            e['sender'],
+            e['subject'],
+            e['body'],
+            e['received_at'],
+            now
+        ))
+        
+    try:
+        # INSERT OR IGNORE avoids aborting the whole transaction on duplicates
+        c.executemany('''
+            INSERT OR IGNORE INTO emails (google_id, sender, subject, body_original, received_at, ingested_at, status)
+            VALUES (?, ?, ?, ?, ?, ?, 'PENDING')
+        ''', data)
+        conn.commit()
+        return c.rowcount
+    except Exception as e:
+        print(f"Error in bulk save: {e}")
+        return 0
     finally:
         conn.close()
 
