@@ -114,8 +114,22 @@ async def bulk_ingest(file: UploadFile = File(...)):
                     })
             except csv.Error:
                 raise HTTPException(status_code=400, detail="Invalid CSV format")
+                
+        elif file.filename.endswith('.txt'):
+            # Text file support: Each non-empty line is a separate email
+            lines = decoded.splitlines()
+            for i, line in enumerate(lines):
+                line = line.strip()
+                if line:
+                    emails_to_save.append({
+                        "google_id": str(uuid.uuid4()),
+                        "sender": "Text Import",
+                        "subject": f"Text Import Batch #{i+1}",
+                        "body": line,
+                        "received_at": datetime.now()
+                    })
         else:
-            raise HTTPException(status_code=400, detail="Unsupported file format. Use .json or .csv")
+            raise HTTPException(status_code=400, detail="Unsupported file format. Use .json, .csv, or .txt")
             
         count = bulk_save_emails(emails_to_save)
         logger.info(f"Bulk ingest complete. Saved {count} emails.")

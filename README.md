@@ -1,4 +1,4 @@
-<<<<<<< HEAD
+
 # LIC Email Intelligence Platform
 
 A local, on-premise AI platform for processing and analyzing emails securely.
@@ -29,6 +29,3 @@ A local, on-premise AI platform for processing and analyzing emails securely.
 - Python 3.8+
 - Node.js
 - Ollama (running locally on port 11434)
-=======
-# LIC_PLATFORM
->>>>>>> 5da2d3097b65e72a827fd49a7ff260eec099eb34

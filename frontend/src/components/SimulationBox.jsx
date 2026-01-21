@@ -73,7 +73,7 @@ const SimulationBox = ({ onInject, onBulkInject }) => {
                         <input
                             id="bulk-file-input"
                             type="file"
-                            accept=".json,.csv"
+                            accept=".json,.csv,.txt"
                             onChange={(e) => setFile(e.target.files[0])}
                             className="hidden"
                         />
@@ -82,7 +82,7 @@ const SimulationBox = ({ onInject, onBulkInject }) => {
                                 {file ? file.name : "Select File"}
                             </div>
                             <div className="text-gray-400 text-xs">
-                                {file ? `${(file.size / 1024).toFixed(1)} KB` : "Drop .json or .csv here"}
+                                {file ? `${(file.size / 1024).toFixed(1)} KB` : "Drop .json, .csv or .txt here"}
                             </div>
                         </label>
                     </div>
