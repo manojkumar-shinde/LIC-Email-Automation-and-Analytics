@@ -1,16 +1,22 @@
 import time
 import logging
-from app.database import get_pending_email, update_email_analysis
+from typing import Optional
+from app.database import claim_next_pending_email, update_email_analysis
+from app.privacy import redact_pii
+from app.brain import analyze_email
 
 # Setup Logging
 logger = logging.getLogger("Worker")
+logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
 
-def process_email():
-    # Lazy import to prevent blocking main process startup
-    from app.privacy import redact_pii
-    from app.brain import analyze_email
+def process_email() -> bool:
+    """
+    Claims and processes a single email. 
+    Returns True if an email was processed, False otherwise.
+    """
     
-    email = get_pending_email()
+    # Atomic claim - safe for multiple workers
+    email = claim_next_pending_email()
     if not email:
         return False
 
@@ -19,8 +25,11 @@ def process_email():
     try:
         # Step 1: Redaction
         original_body = email['body_original']
+        # If body is empty, handle gracefully
+        if not original_body:
+            original_body = ""
+            
         redacted_body = redact_pii(original_body)
-        logger.info("Redaction complete.")
         
         # Step 2: AI Analysis (RAG)
         analysis_result = analyze_email(redacted_body)
@@ -33,23 +42,50 @@ def process_email():
             suggested_action=analysis_result.get('suggested_action', 'Review'),
             status='COMPLETED'
         )
-        logger.info("Analysis saved and email marked COMPLETED.")
+        logger.info(f"Email {email['id']} completed.")
         return True
 
     except Exception as e:
         logger.error(f"Failed to process email {email['id']}: {e}")
+        # Ideally, we should update status to FAILED here to prevent stuck 'PROCESSING' state
+        try:
+             # Basic failure handling
+             update_email_analysis(
+                email_id=email['id'],
+                redacted_body="",
+                analysis={"error": str(e)},
+                suggested_action="Manual Intervention",
+                status='FAILED'
+            )
+        except Exception as db_e:
+            logger.error(f"Failed to mark email {email['id']} as FAILED: {db_e}")
         return False
 
 def start_loop():
     logger.info("Starting ETL Worker...")
+    
+    # Exponential Backoff Config
+    min_sleep = 2
+    max_sleep = 60
+    current_sleep = min_sleep
+    
     while True:
         try:
             worked = process_email()
-            if not worked:
-                time.sleep(2) # Idle wait
+            if worked:
+                # Reset backoff on success
+                current_sleep = min_sleep
+            else:
+                # No work - sleep and backoff
+                time.sleep(current_sleep)
+                current_sleep = min(current_sleep * 1.5, max_sleep)
+                
+        except KeyboardInterrupt:
+            logger.info("Worker stopped by user.")
+            break
         except Exception as e:
             logger.error(f"Worker Loop Error: {e}")
-            time.sleep(5)
+            time.sleep(5) 
 
 if __name__ == '__main__':
     start_loop()

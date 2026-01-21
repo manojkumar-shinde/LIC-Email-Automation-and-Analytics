@@ -14,7 +14,9 @@ from app.database import save_email, init_db
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
 logger = logging.getLogger("Ingestor")
 
-# If modifying these scopes, delete the file token.pickle.
+# Config
+# Ideally from env vars
+POLL_INTERVAL = 10
 SCOPES = ['https://www.googleapis.com/auth/gmail.modify']
 CREDENTIALS_FILE = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'credentials.json')
 TOKEN_FILE = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'token.pickle')
@@ -22,15 +24,21 @@ TOKEN_FILE = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file
 def get_service():
     creds = None
     if os.path.exists(TOKEN_FILE):
-        with open(TOKEN_FILE, 'rb') as token:
-            creds = pickle.load(token)
+        try:
+            with open(TOKEN_FILE, 'rb') as token:
+                creds = pickle.load(token)
+        except Exception as e:
+            logger.error(f"Corrupt token file: {e}")
+            os.remove(TOKEN_FILE)
+
     if not creds or not creds.valid:
         if creds and creds.expired and creds.refresh_token:
             try:
                 creds.refresh(Request())
             except Exception as e:
                 logger.error(f"Error refreshing token: {e}")
-                os.remove(TOKEN_FILE)
+                if os.path.exists(TOKEN_FILE):
+                    os.remove(TOKEN_FILE)
                 return None
         else:
             if not os.path.exists(CREDENTIALS_FILE):
@@ -42,11 +50,16 @@ def get_service():
             except Exception as e:
                 logger.error(f"Failed to auth: {e}")
                 return None
-        with open(TOKEN_FILE, 'wb') as token:
-            pickle.dump(creds, token)
+                
+        # Save the credentials for the next run
+        try:
+            with open(TOKEN_FILE, 'wb') as token:
+                pickle.dump(creds, token)
+        except Exception as e:
+            logger.error(f"Failed to save token: {e}")
 
     try:
-        service = build('gmail', 'v1', credentials=creds)
+        service = build('gmail', 'v1', credentials=creds, cache_discovery=False)
         return service
     except Exception as e:
         logger.error(f"Failed to build service: {e}")
@@ -67,6 +80,7 @@ def decode_body(payload):
     return body
 
 def fetch_and_save_emails(service):
+    """Fetches unread emails and saves them to DB."""
     try:
         results = service.users().messages().list(userId='me', q='is:unread').execute()
         messages = results.get('messages', [])
@@ -76,6 +90,8 @@ def fetch_and_save_emails(service):
 
         logger.info(f"Found {len(messages)} unread messages.")
 
+        # In a high-volume app, we would use batch requests here.
+        # For simplicity and reliability in this refactor, we iterate safely.
         for msg in messages:
             msg_id = msg['id']
             try:
@@ -91,9 +107,13 @@ def fetch_and_save_emails(service):
 
                 if save_email(msg_id, sender, subject, body, received_at):
                     logger.info(f"Saved email: {subject}")
+                    # Mark as read
                     service.users().messages().modify(userId='me', id=msg_id, body={'removeLabelIds': ['UNREAD']}).execute()
                 else:
-                    logger.warning(f"Duplicate email skipped: {msg_id}")
+                    logger.info(f"Duplicate email skipped: {msg_id}")
+                    # Optionally mark as read anyway to stop processing loop? 
+                    # For now, we assume if it's in DB, we should mark read.
+                    service.users().messages().modify(userId='me', id=msg_id, body={'removeLabelIds': ['UNREAD']}).execute()
                     
             except Exception as e:
                 logger.error(f"Error processing message {msg_id}: {e}")
@@ -103,15 +123,23 @@ def fetch_and_save_emails(service):
 
 def start_loop():
     logger.info("Starting Ingestor Service...")
-    init_db()
+    # Ideally main.py handles DB init, but ingestor handles its own dependencies if standalone
+    init_db() 
+    
     while True:
-        service = get_service()
-        if service:
-            fetch_and_save_emails(service)
-        else:
-            logger.warning("Gmail service not available. Retrying in 10s...")
-            time.sleep(5) 
-        time.sleep(5)
+        try:
+            service = get_service()
+            if service:
+                fetch_and_save_emails(service)
+            else:
+                logger.warning("Gmail service unavailable. Retrying...")
+        except KeyboardInterrupt:
+            logger.info("Ingestor stopped by user.")
+            break
+        except Exception as e:
+            logger.error(f"Ingestor Loop critical error: {e}")
+        
+        time.sleep(POLL_INTERVAL)
 
 if __name__ == '__main__':
     start_loop()

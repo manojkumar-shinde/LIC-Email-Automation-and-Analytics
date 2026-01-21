@@ -1,5 +1,6 @@
 import os
 import logging
+from functools import lru_cache
 from typing import List
 from langchain_chroma import Chroma
 from langchain_ollama import OllamaEmbeddings
@@ -13,10 +14,13 @@ logger = logging.getLogger("RAG")
 DATA_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "data", "chroma_db")
 DOCS_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "documents")
 
+@lru_cache(maxsize=1)
 def get_embedding_function():
+    logger.info("Loading Embedding Model (gemma2:2b)...")
     return OllamaEmbeddings(model="gemma2:2b")
 
 def get_vector_store():
+    # Chroma handles persistence automatically in this dir
     return Chroma(
         persist_directory=DATA_DIR,
         embedding_function=get_embedding_function()
@@ -31,6 +35,16 @@ def ingest_docs():
     files = [f for f in os.listdir(DOCS_DIR) if f.endswith('.pdf')]
     if not files:
         logger.info("No PDF documents found to ingest.")
+        return
+
+    vector_store = get_vector_store()
+    
+    # Check if DB is already populated to avoid duplicate ingestion
+    # A simple check: if we have any documents, assume initially ingested.
+    # In a real system, we'd check file hashes.
+    existing_docs = vector_store.get(limit=1)
+    if existing_docs and existing_docs['ids']:
+        logger.info("Vector store already contains documents. Skipping re-ingestion.")
         return
 
     logger.info(f"Found {len(files)} PDFs. Starting ingestion...")
@@ -50,10 +64,7 @@ def ingest_docs():
             logger.error(f"Failed to load {file}: {e}")
 
     if all_splits:
-        vector_store = get_vector_store()
         vector_store.add_documents(documents=all_splits)
-        # Chroma automatically persists in newer versions, but if needed:
-        # vector_store.persist() 
         logger.info(f"Successfully ingested {len(all_splits)} chunks into ChromaDB.")
 
 def get_retriever():
