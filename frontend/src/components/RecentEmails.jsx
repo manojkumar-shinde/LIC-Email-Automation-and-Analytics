@@ -18,7 +18,8 @@ const RecentEmails = ({ emails }) => {
                             <th className="p-4">Subject</th>
                             <th className="p-4">Intent</th>
                             <th className="p-4">Sentiment</th>
-                            <th className="p-4">AI Suggestion</th>
+                            <th className="p-4">Confidence</th>
+                            <th className="p-4">Summary</th>
                             <th className="p-4">Status</th>
                         </tr>
                     </thead>
@@ -38,18 +39,27 @@ const RecentEmails = ({ emails }) => {
                                     </span>
                                 </td>
                                 <td className="p-4">
-                                    <span className={`px-2 py-1 rounded-md text-xs font-medium border ${email.analysis?.sentiment === 'Negative' ? 'bg-red-900 text-red-300 border-red-700' :
-                                            email.analysis?.sentiment === 'Positive' ? 'bg-green-900 text-green-300 border-green-700' :
+                                    <span className={`px-2 py-1 rounded-md text-xs font-medium border ${email.analysis?.sentiment === 'NEGATIVE' ? 'bg-red-900 text-red-300 border-red-700' :
+                                            email.analysis?.sentiment === 'POSITIVE' ? 'bg-green-900 text-green-300 border-green-700' :
                                                 'bg-gray-700 text-gray-300 border-gray-600'
                                         }`}>
                                         {email.analysis?.sentiment || '...'}
+                                    </span>
+                                </td>
+                                <td className="p-4">
+                                    <span className={`px-2 py-1 rounded-md text-xs font-medium border ${email.analysis?.confidence === 'Low' ? 'bg-red-900 text-red-300 border-red-700' :
+                                        email.analysis?.confidence === 'High' ? 'bg-green-900 text-green-300 border-green-700' :
+                                            'bg-gray-700 text-gray-300 border-gray-600'
+                                        }`}>
+                                        {email.analysis?.confidence || '...'}
                                     </span>
                                 </td>
                                 <td className="p-4 max-w-[300px]">
                                     <div className="flex items-start space-x-2">
                                         <Lightbulb className="w-4 h-4 text-yellow-500 mt-1 flex-shrink-0" />
                                         <span className="text-sm text-gray-300">
-                                            {email.suggested_action || 'Pending Analysis...'}
+                                            {/* We mapped summary to suggested_action column in backend */}
+                                            {email.analysis?.summary || email.suggested_action || 'Pending Analysis...'}
                                         </span>
                                     </div>
                                 </td>

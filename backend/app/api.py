@@ -152,7 +152,7 @@ def export_csv():
         writer = csv.writer(output)
         
         # Header
-        writer.writerow(['ID', 'Sender', 'Subject', 'Received At', 'Status', 'Intent', 'Sentiment', 'Suggested Action', 'Redacted Body'])
+        writer.writerow(['ID', 'Sender', 'Subject', 'Received At', 'Status', 'Intent', 'Confidence', 'Sentiment', 'Summary', 'Redacted Body'])
         
         for email in emails_data:
             analysis = {}
@@ -161,7 +161,10 @@ def export_csv():
                     analysis = json.loads(email['analysis'])
                 except:
                     pass
-                    
+            
+            # Use suggested_action column for summary as per worker mapping
+            summary = email.get('suggested_action', '')
+            
             writer.writerow([
                 email['id'],
                 email['sender'],
@@ -169,8 +172,9 @@ def export_csv():
                 email['received_at'],
                 email['status'],
                 analysis.get('intent', ''),
+                analysis.get('confidence', 'N/A'),
                 analysis.get('sentiment', ''),
-                email.get('suggested_action', ''),
+                summary,
                 email['body_redacted']
             ])
             

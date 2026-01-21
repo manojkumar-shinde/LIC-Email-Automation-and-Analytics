@@ -35,14 +35,18 @@ def process_email() -> bool:
         analysis_result = analyze_email(redacted_body)
         
         # Step 3: Save results
+        # Mapping new schema (summary, confidence) to DB columns
+        # We store 'summary' in 'suggested_action' column to reuse existing schema
+        summary = analysis_result.get('summary', 'No summary provided.')
+        
         update_email_analysis(
             email_id=email['id'],
             redacted_body=redacted_body,
-            analysis=analysis_result, # Stores full JSON in analysis column
-            suggested_action=analysis_result.get('suggested_action', 'Review'),
+            analysis=analysis_result, # Stores full JSON (intent, sentiment, summary, confidence)
+            suggested_action=summary, # Storing summary here for frontend compatibility
             status='COMPLETED'
         )
-        logger.info(f"Email {email['id']} completed.")
+        logger.info(f"Email {email['id']} completed. Intent: {analysis_result.get('intent')}")
         return True
 
     except Exception as e:
