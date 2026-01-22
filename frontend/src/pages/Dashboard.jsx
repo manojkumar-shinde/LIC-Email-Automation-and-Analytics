@@ -8,17 +8,26 @@ import ExportButton from '../components/ExportButton';
 const Dashboard = () => {
     const [stats, setStats] = useState({});
     const [emails, setEmails] = useState([]);
+
+    // Pagination State
+    const [currentPage, setCurrentPage] = useState(1);
+    const [totalPages, setTotalPages] = useState(1);
+    const pageSize = 20;
+
     const [isIngesting, setIsIngesting] = useState(false);
 
     const fetchData = async () => {
         try {
-            const statsRes = await fetch('http://localhost:8000/api/stats');
+            const statsRes = await fetch('http://localhost:8001/api/stats');
             const statsData = await statsRes.json();
             setStats(statsData);
 
-            const emailsRes = await fetch('http://localhost:8000/api/emails');
-            const emailsData = await emailsRes.json();
-            setEmails(emailsData);
+            // Fetch with pagination
+            const emailsRes = await fetch(`http://localhost:8001/api/emails?page=${currentPage}&limit=${pageSize}`);
+            const emailsResponse = await emailsRes.json();
+
+            setEmails(emailsResponse.items || []);
+            setTotalPages(Math.ceil((emailsResponse.total || 0) / pageSize));
 
             // Simple heuristic for "Ingesting": if pending > 0
             setIsIngesting(statsData.pending > 0);
@@ -29,7 +38,7 @@ const Dashboard = () => {
 
     const handleInject = async (data) => {
         try {
-            await fetch('http://localhost:8000/api/ingest', {
+            await fetch('http://localhost:8001/api/ingest', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify(data)
@@ -45,7 +54,7 @@ const Dashboard = () => {
             const formData = new FormData();
             formData.append('file', file);
 
-            await fetch('http://localhost:8000/api/ingest/bulk', {
+            await fetch('http://localhost:8001/api/ingest/bulk', {
                 method: 'POST',
                 body: formData
             });
@@ -59,7 +68,7 @@ const Dashboard = () => {
         fetchData();
         const interval = setInterval(fetchData, 2000);
         return () => clearInterval(interval);
-    }, []);
+    }, [currentPage]); // Re-fetch when page changes
 
     return (
         <div className="p-8 max-w-[1600px] mx-auto">
@@ -78,7 +87,12 @@ const Dashboard = () => {
 
             <div className="grid grid-cols-1 lg:grid-cols-4 gap-8">
                 <div className="lg:col-span-3">
-                    <RecentEmails emails={emails} />
+                    <RecentEmails
+                        emails={emails}
+                        currentPage={currentPage}
+                        totalPages={totalPages}
+                        onPageChange={setCurrentPage}
+                    />
                 </div>
                 <div className="lg:col-span-1">
                     <SimulationBox onInject={handleInject} onBulkInject={handleBulkInject} />

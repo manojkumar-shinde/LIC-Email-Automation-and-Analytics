@@ -37,18 +37,20 @@ def stats():
         logger.error(f"Error fetching stats: {e}")
         raise HTTPException(status_code=500, detail="Internal Server Error")
 
-@router.get("/emails", response_model=List[dict])
-def emails(limit: int = 50):
+@router.get("/emails")
+def emails(page: int = 1, limit: int = 20):
+    print(f"DEBUG: EMAILS CALL page={page} limit={limit}", flush=True)
     try:
-        data = get_recent_emails(limit)
+        result = get_recent_emails(page=page, limit=limit)
+        
         # Parse JSON strings to objects for frontend
-        for email in data:
+        for email in result['items']:
             if email.get('analysis'):
                 try:
                     email['analysis'] = json.loads(email['analysis'])
                 except (json.JSONDecodeError, TypeError):
                     email['analysis'] = {} # Fallback
-        return data
+        return result
     except Exception as e:
         logger.error(f"Error fetching emails: {e}")
         raise HTTPException(status_code=500, detail="Internal Server Error")
@@ -91,11 +93,16 @@ async def bulk_ingest(file: UploadFile = File(...)):
                  
             if isinstance(data, list):
                 for item in data:
+                    # Validations: Check for body, content, or text keys
+                    body = item.get('body') or item.get('content') or item.get('text') or ''
+                    if not body or not str(body).strip():
+                        continue # Skip empty emails
+                        
                     emails_to_save.append({
                         "google_id": item.get('google_id', str(uuid.uuid4())),
                         "sender": item.get('sender', 'Simulator'),
                         "subject": item.get('subject', 'No Subject'),
-                        "body": item.get('body', ''),
+                        "body": str(body).strip(),
                         "received_at": datetime.now()
                     })
             else:
@@ -104,12 +111,28 @@ async def bulk_ingest(file: UploadFile = File(...)):
         elif file.filename.endswith('.csv'):
             try:
                 reader = csv.DictReader(io.StringIO(decoded))
-                for row in reader:
+                for i, row in enumerate(reader):
+                    # Helper to find key case-insensitively
+                    keys = {k.lower(): k for k in row.keys()}
+                    
+                    # Try to find a body-like column
+                    body_key = keys.get('body') or keys.get('content') or keys.get('text') or keys.get('message') or keys.get('description') or keys.get('email_body')
+                    
+                    body = row[body_key] if body_key else ''
+                    
+                    # Try to find sender-like column
+                    sender_key = keys.get('sender') or keys.get('from') or keys.get('sender_name') or keys.get('sender_email')
+                    sender = row[sender_key] if sender_key else 'Simulator'
+                    
+                    if not body or not str(body).strip():
+                         logger.warning(f"Row {i} skipped: Empty body. Keys found: {list(row.keys())}")
+                         continue # Skip empty
+                         
                     emails_to_save.append({
                         "google_id": row.get('google_id', str(uuid.uuid4())),
-                        "sender": row.get('sender', 'Simulator'),
+                        "sender": sender,
                         "subject": row.get('subject', 'No Subject'),
-                        "body": row.get('body', ''),
+                        "body": str(body).strip(),
                         "received_at": datetime.now()
                     })
             except csv.Error:
@@ -145,8 +168,9 @@ async def bulk_ingest(file: UploadFile = File(...)):
 def export_csv():
     """Stream a CSV export of all completed emails."""
     try:
-        # We'll just fetch recent for now, ideally fetch ALL
-        emails_data = get_recent_emails(limit=1000)
+        # We'll just fetch recent for now, ideally fetch ALL (limit=10000)
+        result = get_recent_emails(page=1, limit=10000)
+        emails_data = result['items']
         
         output = io.StringIO()
         writer = csv.writer(output)

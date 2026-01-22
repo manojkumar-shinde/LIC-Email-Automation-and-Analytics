@@ -198,8 +198,21 @@ def get_stats() -> Dict[str, Any]:
         "avg_latency": round(avg_latency, 2)
     }
 
-def get_recent_emails(limit: int = 50) -> List[Dict[str, Any]]:
+def get_recent_emails(page: int = 1, limit: int = 20) -> Dict[str, Any]:
+    offset = (page - 1) * limit
     with get_db_cursor() as c:
-        c.execute("SELECT * FROM emails ORDER BY ingested_at DESC LIMIT ?", (limit,))
+        # Get total count
+        c.execute("SELECT COUNT(*) FROM emails")
+        row = c.fetchone()
+        total = row[0] if row else 0
+        
+        # Get paged items
+        c.execute("SELECT * FROM emails ORDER BY ingested_at ASC LIMIT ? OFFSET ?", (limit, offset))
         rows = c.fetchall()
-        return [dict(row) for row in rows]
+        
+        return {
+            "items": [dict(row) for row in rows],
+            "total": total,
+            "page": page,
+            "size": limit
+        }
