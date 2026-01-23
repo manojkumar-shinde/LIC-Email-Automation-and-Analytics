@@ -1,0 +1,11 @@
+LIC POLICY STATUS AND CUSTOMER PORTAL
+
+LIC provides an online customer portal for policyholders to access policy-related information.
+To register, users must provide policy number, date of birth, premium details, mobile number, and email address.
+
+Once registered, policyholders can view policy status, premium payment history,
+maturity details, bonus information, loan eligibility, and claim status.
+The portal also allows downloading premium receipts, updating contact details,
+registering nominees, and tracking service requests.
+
+Online access improves transparency and reduces the need for branch visits.

@@ -4,7 +4,7 @@ from functools import lru_cache
 from typing import List
 from langchain_chroma import Chroma
 from langchain_ollama import OllamaEmbeddings
-from langchain_community.document_loaders import PyPDFLoader
+from langchain_community.document_loaders import PyPDFLoader, TextLoader
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 
 # Setup Logging
@@ -26,15 +26,33 @@ def get_vector_store():
         embedding_function=get_embedding_function()
     )
 
+def infer_category_from_filename(filename: str) -> str:
+    """
+    Determines document category based on filename keywords.
+    Deterministic and simple rules.
+    """
+    lower_name = filename.lower()
+    if 'claims' in lower_name:
+        return 'claims'
+    elif 'payment' in lower_name:
+        return 'payment'
+    elif 'policy' in lower_name:
+        return 'policy'
+    elif 'faq' in lower_name:
+        return 'faq'
+    elif 'sop' in lower_name:
+        return 'sop'
+    return 'general'
+
 def ingest_docs():
-    """Checks documents folder and ingests new PDFs into ChromaDB."""
+    """Checks documents folder and ingests new PDFs and Text files into ChromaDB."""
     if not os.path.exists(DOCS_DIR):
         logger.warning(f"Documents directory not found: {DOCS_DIR}")
         return
 
-    files = [f for f in os.listdir(DOCS_DIR) if f.endswith('.pdf')]
+    files = [f for f in os.listdir(DOCS_DIR) if f.endswith(('.pdf', '.txt'))]
     if not files:
-        logger.info("No PDF documents found to ingest.")
+        logger.info("No documents found to ingest.")
         return
 
     vector_store = get_vector_store()
@@ -47,7 +65,7 @@ def ingest_docs():
         logger.info("Vector store already contains documents. Skipping re-ingestion.")
         return
 
-    logger.info(f"Found {len(files)} PDFs. Starting ingestion...")
+    logger.info(f"Found {len(files)} documents. Starting ingestion...")
     
     all_splits = []
     text_splitter = RecursiveCharacterTextSplitter(chunk_size=1000, chunk_overlap=200)
@@ -55,11 +73,28 @@ def ingest_docs():
     for file in files:
         file_path = os.path.join(DOCS_DIR, file)
         try:
-            loader = PyPDFLoader(file_path)
+            if file.endswith('.pdf'):
+                loader = PyPDFLoader(file_path)
+                doc_type = 'pdf'
+            elif file.endswith('.txt'):
+                loader = TextLoader(file_path, encoding='utf-8')
+                doc_type = 'txt'
+            else:
+                continue
+
             docs = loader.load()
+            
+            # Enrich metadata
+            category = infer_category_from_filename(file)
+            for doc in docs:
+                doc.metadata["category"] = category
+                doc.metadata["source"] = file
+                doc.metadata["doc_type"] = doc_type
+
+            
             splits = text_splitter.split_documents(docs)
             all_splits.extend(splits)
-            logger.info(f"Processed {file}: {len(splits)} chunks.")
+            logger.info(f"Processed {file}: {len(splits)} chunks. Category: {category}")
         except Exception as e:
             logger.error(f"Failed to load {file}: {e}")
 
@@ -67,6 +102,11 @@ def ingest_docs():
         vector_store.add_documents(documents=all_splits)
         logger.info(f"Successfully ingested {len(all_splits)} chunks into ChromaDB.")
 
-def get_retriever():
+def get_retriever(category: str = None):
     vector_store = get_vector_store()
-    return vector_store.as_retriever(search_kwargs={"k": 3})
+    search_kwargs = {"k": 3}
+    
+    if category:
+        search_kwargs["filter"] = {"category": category}
+        
+    return vector_store.as_retriever(search_kwargs=search_kwargs)

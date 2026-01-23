@@ -1,0 +1,11 @@
+POLICY SERVICING VS CLAIMS
+
+Policy servicing refers to non-claim related requests made after policy issuance.
+These include changes to address, phone number, email ID, nominee details,
+bank account updates, and revival of lapsed policies.
+
+Claims involve a formal request for payment under the policy terms
+and require verification and settlement procedures.
+
+Policy servicing requests are generally simpler and are handled separately
+from claim-related activities.
