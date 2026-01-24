@@ -18,19 +18,19 @@ const Dashboard = () => {
 
     const fetchData = async () => {
         try {
-            const statsRes = await fetch('http://localhost:8001/api/stats');
+            const statsRes = await fetch('http://localhost:8000/api/stats');
             const statsData = await statsRes.json();
             setStats(statsData);
 
             // Fetch with pagination
-            const emailsRes = await fetch(`http://localhost:8001/api/emails?page=${currentPage}&limit=${pageSize}`);
+            const emailsRes = await fetch(`http://localhost:8000/api/emails?page=${currentPage}&limit=${pageSize}`);
             const emailsResponse = await emailsRes.json();
 
             setEmails(emailsResponse.items || []);
             setTotalPages(Math.ceil((emailsResponse.total || 0) / pageSize));
 
-            // Simple heuristic for "Ingesting": if pending > 0
-            setIsIngesting(statsData.pending > 0);
+            // Pipeline is active if there are pending OR processing emails
+            setIsIngesting(statsData.pending > 0 || statsData.processing > 0);
         } catch (e) {
             console.error("Failed to fetch data:", e);
         }
@@ -38,7 +38,7 @@ const Dashboard = () => {
 
     const handleInject = async (data) => {
         try {
-            await fetch('http://localhost:8001/api/ingest', {
+            await fetch('http://localhost:8000/api/ingest', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify(data)
@@ -54,7 +54,7 @@ const Dashboard = () => {
             const formData = new FormData();
             formData.append('file', file);
 
-            await fetch('http://localhost:8001/api/ingest/bulk', {
+            await fetch('http://localhost:8000/api/ingest/bulk', {
                 method: 'POST',
                 body: formData
             });

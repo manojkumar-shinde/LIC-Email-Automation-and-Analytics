@@ -4,6 +4,7 @@ from typing import Optional
 from app.database import claim_next_pending_email, update_email_analysis
 from app.privacy import redact_pii
 from app.brain import analyze_email
+from app.priority import compute_priority
 
 # Setup Logging
 logger = logging.getLogger("Worker")
@@ -34,7 +35,22 @@ def process_email() -> bool:
         # Step 2: AI Analysis (RAG)
         analysis_result = analyze_email(redacted_body)
         
-        # Step 3: Save results
+        # Step 3: Priority Classification (Rule-based)
+        # AI provides context → Rules make decisions
+        priority, priority_reason = compute_priority(
+            intent=analysis_result.get('intent', ''),
+            sentiment=analysis_result.get('sentiment', ''),
+            summary=analysis_result.get('summary', ''),
+            redacted_body=redacted_body
+        )
+        
+        # Enrich analysis result with priority
+        analysis_result['priority'] = priority
+        analysis_result['priority_reason'] = priority_reason
+        
+        logger.info(f"Email {email['id']} - Priority: {priority} ({priority_reason})")
+        
+        # Step 4: Save results
         # Mapping new schema (summary, confidence) to DB columns
         # We store 'summary' in 'suggested_action' column to reuse existing schema
         summary = analysis_result.get('summary', 'No summary provided.')
@@ -42,7 +58,7 @@ def process_email() -> bool:
         update_email_analysis(
             email_id=email['id'],
             redacted_body=redacted_body,
-            analysis=analysis_result, # Stores full JSON (intent, sentiment, summary, confidence)
+            analysis=analysis_result, # Stores full JSON (intent, sentiment, summary, confidence, priority)
             suggested_action=summary, # Storing summary here for frontend compatibility
             status='COMPLETED'
         )

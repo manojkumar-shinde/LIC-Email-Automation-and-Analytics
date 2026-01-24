@@ -126,7 +126,7 @@ If any answer is NO, fix it before responding.
 def get_chain():
     """Builds and caches the RAG chain."""
     logger.info("Initializing LLM Chain (gemma2:2b)...")
-    llm = ChatOllama(model="gemma2:2b", format="json", temperature=0)
+    llm = ChatOllama(model="gemma2:2b", format="json", temperature=0, timeout=30.0)
     
     prompt = PromptTemplate(
         input_variables=["context", "email"],
@@ -160,10 +160,11 @@ def analyze_email(redacted_body: str) -> dict:
         return result
     except Exception as e:
         logger.error(f"RAG Chain failed: {e}")
-        # Return fallback structure
+        logger.warning("Using fallback analysis (LLM unavailable)")
+        # Return fallback with indication that LLM service is unavailable
         return {
             "intent": "GENERAL_ENQUIRY",
             "sentiment": "NEUTRAL",
-            "summary": "Analysis failed due to internal error.",
+            "summary": f"LLM Service Unavailable. Email received and queued for review.",
             "confidence": "Low"
         }

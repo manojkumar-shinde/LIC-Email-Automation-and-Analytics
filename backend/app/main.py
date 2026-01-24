@@ -2,8 +2,9 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from app.api import router
-from app import database, rag
+from app import database, rag, worker
 import logging
+import asyncio
 
 # Setup Logger
 logger = logging.getLogger("Main")
@@ -16,16 +17,29 @@ async def lifespan(app: FastAPI):
     logger.info("Initializing Database...")
     database.init_db()
     
-    # In a production app, heavy tasks like RAG ingestion might be delegated to a worker 
-    # or run in the background to avoid blocking startup. 
-    # For this local setup, we'll keep it simple but acknowledge the tradeoff.
     logger.info("Checking for Policy Documents (RAG)...")
-    rag.ingest_docs()
+    # Run RAG ingestion in a thread to avoid blocking
+    await asyncio.to_thread(rag.ingest_docs)
+    
+    # Create worker task reference
+    worker_task = None
+    
+    # Define worker coroutine
+    async def start_worker():
+        await asyncio.sleep(1)  # Brief delay to ensure server is ready
+        logger.info("Starting email processing worker...")
+        await asyncio.to_thread(worker.start_loop)
+    
+    # Start worker in background
+    worker_task = asyncio.create_task(start_worker())
+    logger.info("Email processing worker task created")
     
     yield
     
     # Shutdown
     logger.info("Application shutting down...")
+    if worker_task and not worker_task.done():
+        worker_task.cancel()
 
 app = FastAPI(
     title="LIC Email Intelligence Platform",
