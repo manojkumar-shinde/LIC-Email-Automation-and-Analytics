@@ -125,8 +125,8 @@ If any answer is NO, fix it before responding.
 @lru_cache(maxsize=1)
 def get_chain():
     """Builds and caches the RAG chain."""
-    logger.info("Initializing LLM Chain (llama3)...")
-    llm = ChatOllama(model="llama3", format="json", temperature=0, timeout=30.0)
+    logger.info("Initializing LLM Chain (gemma2:2b)...")
+    llm = ChatOllama(model="gemma2:2b", format="json", temperature=0, timeout=30.0)
     
     prompt = PromptTemplate(
         input_variables=["context", "email"],
