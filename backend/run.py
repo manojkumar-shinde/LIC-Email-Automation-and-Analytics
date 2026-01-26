@@ -3,9 +3,23 @@ import uvicorn
 import time
 import os
 import sys
+import traceback
+from datetime import datetime
 
 # Ensure src path is in pythonpath
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
+
+# Ensure logs directory exists
+LOG_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'logs')
+os.makedirs(LOG_DIR, exist_ok=True)
+STARTUP_LOG = os.path.join(LOG_DIR, 'startup.log')
+
+def _log_startup(msg: str):
+    ts = datetime.now().isoformat()
+    line = f"[{ts}] {msg}\n"
+    with open(STARTUP_LOG, 'a', encoding='utf-8') as f:
+        f.write(line)
+    print(msg)
 
 # Define wrapper functions that import dependencies INSIDE the process
 # This prevents top-level imports from running in every subprocess on Windows
@@ -13,7 +27,7 @@ sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 def run_api():
     # Deferred import to keep main process clean
     from app.main import app
-    print("DEBUG: API Process Starting...")
+    _log_startup("DEBUG: API Process Starting...")
     sys.stdout.flush()
     uvicorn.run(app, host="0.0.0.0", port=8001, reload=False)
 
@@ -26,20 +40,29 @@ def run_worker():
     worker.start_loop()
 
 if __name__ == "__main__":
-    # Now we can import these for initialization
-    from app import database, rag
-    
-    print("--------------------------------------------------")
-    print("   LIC EMAIL INTELLIGENCE PLATFORM (LOCAL)        ")
-    print("--------------------------------------------------")
-    
-    print("[1/2] Initializing Database...")
-    database.init_db()
-    
-    print("[2/2] Checking for Policy Documents (RAG)...")
-    rag.ingest_docs()
-    
-    print("\nStarting Services...")
+    try:
+        # Now we can import these for initialization
+        from app import database, rag
+
+        _log_startup("--------------------------------------------------")
+        _log_startup("   LIC EMAIL INTELLIGENCE PLATFORM (LOCAL)        ")
+        _log_startup("--------------------------------------------------")
+
+        _log_startup("[1/2] Initializing Database...")
+        database.init_db()
+
+        _log_startup("[2/2] Checking for Policy Documents (RAG)...")
+        try:
+            rag.ingest_docs()
+        except Exception as e:
+            _log_startup(f"RAG ingestion failed: {e}")
+            _log_startup(traceback.format_exc())
+
+        _log_startup("\nStarting Services...")
+    except Exception as e:
+        _log_startup(f"Startup failed: {e}")
+        _log_startup(traceback.format_exc())
+        raise
     
     # Create processes
     p_api = multiprocessing.Process(target=run_api, name="API_Server")
@@ -55,10 +78,10 @@ if __name__ == "__main__":
         while True:
             time.sleep(1)
             if not p_api.is_alive():
-                print("API Server died!")
+                _log_startup("API Server died!")
                 break
     except KeyboardInterrupt:
-        print("\nStopping services...")
+        _log_startup("\nStopping services...")
     finally:
         # p_ingestor.terminate()
         p_worker.terminate()
@@ -66,4 +89,4 @@ if __name__ == "__main__":
         # p_ingestor.join()
         p_worker.join()
         p_api.join()
-        print("All services stopped.")
+        _log_startup("All services stopped.")

@@ -1,0 +1,16 @@
+[2026-01-25T23:08:42.852724] Startup failed: No module named 'langchain_chroma'
+[2026-01-25T23:08:42.871733] Traceback (most recent call last):
+  File "D:\LIC_PLATFORM\backend\run.py", line 45, in <module>
+    from app import database, rag
+  File "D:\LIC_PLATFORM\backend\app\rag.py", line 5, in <module>
+    from langchain_chroma import Chroma
+ModuleNotFoundError: No module named 'langchain_chroma'
+
+[2026-01-25T23:09:45.740070] --------------------------------------------------
+[2026-01-25T23:09:45.741070]    LIC EMAIL INTELLIGENCE PLATFORM (LOCAL)        
+[2026-01-25T23:09:45.742070] --------------------------------------------------
+[2026-01-25T23:09:45.742070] [1/2] Initializing Database...
+[2026-01-25T23:09:46.062997] [2/2] Checking for Policy Documents (RAG)...
+[2026-01-25T23:09:48.947403] 
+Starting Services...
+[2026-01-25T23:10:33.151131] DEBUG: API Process Starting...

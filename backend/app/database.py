@@ -6,11 +6,56 @@ import logging
 from typing import List, Dict, Any, Optional, Generator
 from datetime import datetime
 from contextlib import contextmanager
+from cryptography.fernet import Fernet
+import base64
+import hashlib
 
 # Setup Logging
 logger = logging.getLogger("Database")
 
 DB_PATH = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "data", "emails.db")
+
+# Encryption key for storing Gmail credentials
+# In production, load from environment variable: os.getenv('ENCRYPTION_KEY')
+# This is a default key - should be changed in production!
+def get_encryption_key():
+    """Get or generate encryption key for credentials"""
+    key_file = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "data", ".encryption_key")
+    
+    if os.path.exists(key_file):
+        with open(key_file, 'rb') as f:
+            return f.read()
+    else:
+        # Generate new key
+        key = Fernet.generate_key()
+        os.makedirs(os.path.dirname(key_file), exist_ok=True)
+        with open(key_file, 'wb') as f:
+            f.write(key)
+        logger.info("Generated new encryption key for credentials")
+        return key
+
+# Initialize encryption cipher
+_encryption_key = get_encryption_key()
+_cipher_suite = Fernet(_encryption_key)
+
+def encrypt_credential(credential: str) -> str:
+    """Encrypt a credential string"""
+    try:
+        encrypted = _cipher_suite.encrypt(credential.encode())
+        return base64.b64encode(encrypted).decode()
+    except Exception as e:
+        logger.error(f"Encryption error: {e}")
+        raise
+
+def decrypt_credential(encrypted_credential: str) -> str:
+    """Decrypt a credential string"""
+    try:
+        decoded = base64.b64decode(encrypted_credential.encode())
+        decrypted = _cipher_suite.decrypt(decoded)
+        return decrypted.decode()
+    except Exception as e:
+        logger.error(f"Decryption error: {e}")
+        raise
 
 @contextmanager
 def get_db_cursor(commit: bool = False) -> Generator[sqlite3.Cursor, None, None]:
@@ -40,7 +85,7 @@ def get_db_cursor(commit: bool = False) -> Generator[sqlite3.Cursor, None, None]
         conn.close()
 
 def init_db():
-    """Initialize the database with the emails table."""
+    """Initialize the database with the emails and gmail_config tables."""
     logger.info(f"Initializing database at {DB_PATH}")
     os.makedirs(os.path.dirname(DB_PATH), exist_ok=True)
     
@@ -72,6 +117,29 @@ def init_db():
         except sqlite3.OperationalError:
             logger.info("Migrating database: Adding processing_started_at column")
             c.execute("ALTER TABLE emails ADD COLUMN processing_started_at DATETIME")
+        
+        # Create Gmail Config Table
+        c.execute('''
+            CREATE TABLE IF NOT EXISTS gmail_config (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                gmail_email TEXT UNIQUE NOT NULL,
+                auth_method TEXT NOT NULL, -- 'oauth', 'service_account', or 'token'
+                credentials_encrypted TEXT NOT NULL, -- Encrypted API key/token/JSON
+                credentials_hash TEXT NOT NULL, -- Hash for verification
+                sync_enabled BOOLEAN DEFAULT 1,
+                last_sync_time DATETIME,
+                last_sync_status TEXT, -- 'success', 'failed', 'pending'
+                last_sync_error TEXT,
+                total_synced INTEGER DEFAULT 0,
+                created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+                updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+            )
+        ''')
+        # Create indexes for gmail_config
+        c.execute("CREATE INDEX IF NOT EXISTS idx_gmail_email ON gmail_config(gmail_email)")
+        c.execute("CREATE INDEX IF NOT EXISTS idx_sync_enabled ON gmail_config(sync_enabled)")
+        
+        logger.info("Database initialized successfully")
 
 def save_email(google_id: str, sender: str, subject: str, body: str, received_at: datetime) -> bool:
     """Save a new email to the database. Returns True if saved, False if duplicate."""
@@ -216,3 +284,264 @@ def get_recent_emails(page: int = 1, limit: int = 20) -> Dict[str, Any]:
             "page": page,
             "size": limit
         }
+
+
+# ============================================================================
+# GMAIL CONFIG FUNCTIONS
+# ============================================================================
+
+def save_gmail_config(gmail_email: str, auth_method: str, credentials: str) -> bool:
+    """
+    Save or update Gmail configuration with encrypted credentials.
+    
+    Args:
+        gmail_email: Gmail account email address
+        auth_method: Authentication method ('oauth', 'service_account', 'token')
+        credentials: API key, token, or JSON credentials string
+        
+    Returns:
+        True if saved successfully, False otherwise
+    """
+    try:
+        encrypted_creds = encrypt_credential(credentials)
+        # Hash credentials for verification (without storing plaintext)
+        creds_hash = hashlib.sha256(credentials.encode()).hexdigest()
+        
+        with get_db_cursor(commit=True) as c:
+            # Try to update existing config first
+            c.execute('''
+                UPDATE gmail_config 
+                SET auth_method = ?, credentials_encrypted = ?, credentials_hash = ?, updated_at = ?
+                WHERE gmail_email = ?
+            ''', (auth_method, encrypted_creds, creds_hash, datetime.now(), gmail_email))
+            
+            # If no rows updated, insert new config
+            if c.rowcount == 0:
+                c.execute('''
+                    INSERT INTO gmail_config (gmail_email, auth_method, credentials_encrypted, credentials_hash, last_sync_status)
+                    VALUES (?, ?, ?, ?, 'pending')
+                ''', (gmail_email, auth_method, encrypted_creds, creds_hash))
+        
+        logger.info(f"Gmail config saved for {gmail_email}")
+        return True
+        
+    except Exception as e:
+        logger.error(f"Error saving Gmail config: {e}")
+        return False
+
+
+def get_gmail_config(gmail_email: str) -> Optional[Dict[str, Any]]:
+    """
+    Retrieve Gmail configuration (with decrypted credentials).
+    
+    Args:
+        gmail_email: Gmail account email address
+        
+    Returns:
+        Dictionary with config or None if not found
+    """
+    try:
+        with get_db_cursor() as c:
+            c.execute("SELECT * FROM gmail_config WHERE gmail_email = ?", (gmail_email,))
+            row = c.fetchone()
+            
+            if row:
+                config = dict(row)
+                # Decrypt credentials
+                config['credentials'] = decrypt_credential(config['credentials_encrypted'])
+                # Remove encrypted version from response (optional)
+                config.pop('credentials_encrypted', None)
+                config.pop('credentials_hash', None)
+                return config
+            return None
+            
+    except Exception as e:
+        logger.error(f"Error retrieving Gmail config: {e}")
+        return None
+
+
+def get_all_gmail_configs(enabled_only: bool = True) -> List[Dict[str, Any]]:
+    """
+    Retrieve all Gmail configurations.
+    
+    Args:
+        enabled_only: Only return enabled configs
+        
+    Returns:
+        List of configuration dictionaries
+    """
+    try:
+        with get_db_cursor() as c:
+            if enabled_only:
+                c.execute("SELECT * FROM gmail_config WHERE sync_enabled = 1")
+            else:
+                c.execute("SELECT * FROM gmail_config")
+            
+            rows = c.fetchall()
+            configs = []
+            
+            for row in rows:
+                config = dict(row)
+                # Decrypt credentials
+                try:
+                    config['credentials'] = decrypt_credential(config['credentials_encrypted'])
+                except Exception as e:
+                    logger.warning(f"Could not decrypt credentials for {config['gmail_email']}: {e}")
+                    config['credentials'] = None
+                
+                # Remove sensitive data from response
+                config.pop('credentials_encrypted', None)
+                config.pop('credentials_hash', None)
+                configs.append(config)
+            
+            return configs
+            
+    except Exception as e:
+        logger.error(f"Error retrieving Gmail configs: {e}")
+        return []
+
+
+def update_gmail_sync_status(gmail_email: str, status: str, error_msg: str = None) -> bool:
+    """
+    Update Gmail sync status and error information.
+    
+    Args:
+        gmail_email: Gmail account email address
+        status: Sync status ('success', 'failed', 'pending', 'syncing')
+        error_msg: Error message if sync failed
+        
+    Returns:
+        True if updated successfully
+    """
+    try:
+        with get_db_cursor(commit=True) as c:
+            c.execute('''
+                UPDATE gmail_config 
+                SET last_sync_time = ?, last_sync_status = ?, last_sync_error = ?, updated_at = ?
+                WHERE gmail_email = ?
+            ''', (datetime.now(), status, error_msg, datetime.now(), gmail_email))
+        
+        logger.info(f"Gmail sync status updated for {gmail_email}: {status}")
+        return True
+        
+    except Exception as e:
+        logger.error(f"Error updating Gmail sync status: {e}")
+        return False
+
+
+def increment_gmail_sync_count(gmail_email: str, count: int = 1) -> bool:
+    """
+    Increment the number of emails synced from Gmail account.
+    
+    Args:
+        gmail_email: Gmail account email address
+        count: Number to increment by
+        
+    Returns:
+        True if updated successfully
+    """
+    try:
+        with get_db_cursor(commit=True) as c:
+            c.execute('''
+                UPDATE gmail_config 
+                SET total_synced = total_synced + ?, updated_at = ?
+                WHERE gmail_email = ?
+            ''', (count, datetime.now(), gmail_email))
+        
+        return True
+        
+    except Exception as e:
+        logger.error(f"Error incrementing Gmail sync count: {e}")
+        return False
+
+
+def toggle_gmail_sync(gmail_email: str, enabled: bool) -> bool:
+    """
+    Enable or disable Gmail sync for an account.
+    
+    Args:
+        gmail_email: Gmail account email address
+        enabled: True to enable, False to disable
+        
+    Returns:
+        True if updated successfully
+    """
+    try:
+        with get_db_cursor(commit=True) as c:
+            c.execute('''
+                UPDATE gmail_config 
+                SET sync_enabled = ?, updated_at = ?
+                WHERE gmail_email = ?
+            ''', (1 if enabled else 0, datetime.now(), gmail_email))
+        
+        logger.info(f"Gmail sync toggled for {gmail_email}: {enabled}")
+        return True
+        
+    except Exception as e:
+        logger.error(f"Error toggling Gmail sync: {e}")
+        return False
+
+
+def delete_gmail_config(gmail_email: str) -> bool:
+    """
+    Delete Gmail configuration.
+    
+    Args:
+        gmail_email: Gmail account email address
+        
+    Returns:
+        True if deleted successfully
+    """
+    try:
+        with get_db_cursor(commit=True) as c:
+            c.execute("DELETE FROM gmail_config WHERE gmail_email = ?", (gmail_email,))
+        
+        logger.info(f"Gmail config deleted for {gmail_email}")
+        return True
+        
+    except Exception as e:
+        logger.error(f"Error deleting Gmail config: {e}")
+        return False
+
+
+def get_gmail_config_stats() -> Dict[str, Any]:
+    """
+    Get statistics about Gmail configurations.
+    
+    Returns:
+        Dictionary with stats
+    """
+    try:
+        with get_db_cursor() as c:
+            # Count total configs
+            c.execute("SELECT COUNT(*) FROM gmail_config")
+            total = c.fetchone()[0]
+            
+            # Count enabled configs
+            c.execute("SELECT COUNT(*) FROM gmail_config WHERE sync_enabled = 1")
+            enabled = c.fetchone()[0]
+            
+            # Count successful syncs
+            c.execute("SELECT COUNT(*) FROM gmail_config WHERE last_sync_status = 'success'")
+            successful = c.fetchone()[0]
+            
+            # Count failed syncs
+            c.execute("SELECT COUNT(*) FROM gmail_config WHERE last_sync_status = 'failed'")
+            failed = c.fetchone()[0]
+            
+            # Total emails synced
+            c.execute("SELECT SUM(total_synced) FROM gmail_config")
+            row = c.fetchone()
+            total_synced = row[0] if row and row[0] else 0
+        
+        return {
+            "total_accounts": total,
+            "enabled_accounts": enabled,
+            "successful_syncs": successful,
+            "failed_syncs": failed,
+            "total_emails_synced": total_synced
+        }
+        
+    except Exception as e:
+        logger.error(f"Error getting Gmail stats: {e}")
+        return {}

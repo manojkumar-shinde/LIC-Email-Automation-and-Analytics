@@ -16,8 +16,8 @@ DOCS_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__
 
 @lru_cache(maxsize=1)
 def get_embedding_function():
-    logger.info("Loading Embedding Model (gemma2:2b)...")
-    return OllamaEmbeddings(model="gemma2:2b")
+    logger.info("Loading Embedding Model (llama3)...")
+    return OllamaEmbeddings(model="llama3")
 
 def get_vector_store():
     # Chroma handles persistence automatically in this dir

@@ -4,6 +4,7 @@ import PipelineHealth from '../components/PipelineHealth';
 import RecentEmails from '../components/RecentEmails';
 import SimulationBox from '../components/SimulationBox';
 import ExportButton from '../components/ExportButton';
+import GmailConfig from '../components/GmailConfig';
 
 const Dashboard = () => {
     const [stats, setStats] = useState({});
@@ -18,12 +19,12 @@ const Dashboard = () => {
 
     const fetchData = async () => {
         try {
-            const statsRes = await fetch('http://localhost:8000/api/stats');
+            const statsRes = await fetch('http://localhost:8001/api/stats');
             const statsData = await statsRes.json();
             setStats(statsData);
 
             // Fetch with pagination
-            const emailsRes = await fetch(`http://localhost:8000/api/emails?page=${currentPage}&limit=${pageSize}`);
+            const emailsRes = await fetch(`http://localhost:8001/api/emails?page=${currentPage}&limit=${pageSize}`);
             const emailsResponse = await emailsRes.json();
 
             setEmails(emailsResponse.items || []);
@@ -38,7 +39,7 @@ const Dashboard = () => {
 
     const handleInject = async (data) => {
         try {
-            await fetch('http://localhost:8000/api/ingest', {
+            await fetch('http://localhost:8001/api/ingest', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify(data)
@@ -54,7 +55,7 @@ const Dashboard = () => {
             const formData = new FormData();
             formData.append('file', file);
 
-            await fetch('http://localhost:8000/api/ingest/bulk', {
+            await fetch('http://localhost:8001/api/ingest/bulk', {
                 method: 'POST',
                 body: formData
             });
@@ -94,7 +95,8 @@ const Dashboard = () => {
                         onPageChange={setCurrentPage}
                     />
                 </div>
-                <div className="lg:col-span-1">
+                <div className="lg:col-span-1 space-y-6">
+                    <GmailConfig onSync={fetchData} />
                     <SimulationBox onInject={handleInject} onBulkInject={handleBulkInject} />
                 </div>
             </div>

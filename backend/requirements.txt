@@ -4,12 +4,9 @@ uvicorn
 python-multipart
 requests
 
-# Google / Gmail
-google-auth-oauthlib
-google-auth-httplib2
-google-api-python-client
+# Security & Encryption
+cryptography
 
-# AI & RAG
 langchain
 langchain-community
 langchain-chroma

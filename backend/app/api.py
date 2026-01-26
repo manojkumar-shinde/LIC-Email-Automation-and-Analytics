@@ -9,7 +9,19 @@ from fastapi import APIRouter, HTTPException, BackgroundTasks, UploadFile, File
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 
-from app.database import get_stats, get_recent_emails, save_email, bulk_save_emails
+from app.database import (
+    get_stats, 
+    get_recent_emails, 
+    save_email, 
+    bulk_save_emails,
+    save_gmail_config,
+    get_gmail_config,
+    get_all_gmail_configs,
+    toggle_gmail_sync,
+    delete_gmail_config,
+    get_gmail_config_stats
+)
+from app.worker import sync_all_gmail_accounts, sync_gmail_account
 
 # Setup Logging
 logger = logging.getLogger("API")
@@ -25,6 +37,16 @@ class EmailIngest(BaseModel):
 class APIResponse(BaseModel):
     status: str
     message: Optional[str] = None
+    data: Optional[dict] = None
+
+class GmailConnectRequest(BaseModel):
+    gmail_email: str = Field(..., description="Gmail account email address")
+    auth_method: str = Field(default="token", description="Authentication method: 'oauth', 'service_account', or 'token'")
+    api_key: Optional[str] = Field(None, description="API key/token or JSON credentials (depending on auth_method)")
+    
+class GmailSyncResponse(BaseModel):
+    status: str
+    message: str
     data: Optional[dict] = None
 
 # --- Routes ---
@@ -210,3 +232,297 @@ def export_csv():
     except Exception as e:
         logger.error(f"Export failed: {e}")
         raise HTTPException(status_code=500, detail="Export failed")
+
+
+# ============================================================================
+# GMAIL API ENDPOINTS
+# ============================================================================
+
+@router.post("/gmail/connect", response_model=APIResponse)
+def gmail_connect(request: GmailConnectRequest):
+    """
+    Connect a Gmail account to the platform.
+    Saves encrypted credentials for later syncing.
+    
+    Request body:
+    {
+        "gmail_email": "user@gmail.com",
+        "auth_method": "token",  # or "oauth", "service_account"
+        "api_key": "ya29.a0AUMWg_Kkdj6I8XgU8QoGq5..."
+    }
+    
+    Returns:
+    {
+        "status": "success",
+        "message": "Gmail account connected",
+        "data": {
+            "gmail_email": "user@gmail.com",
+            "auth_method": "token",
+            "sync_enabled": true,
+            "last_sync_time": null
+        }
+    }
+    """
+    try:
+        # Validate inputs
+        if not request.gmail_email or "@" not in request.gmail_email:
+            raise HTTPException(status_code=400, detail="Invalid Gmail email address")
+        
+        if not request.api_key:
+            raise HTTPException(status_code=400, detail="API key/credentials required")
+        
+        if request.auth_method not in ["oauth", "service_account", "token"]:
+            raise HTTPException(status_code=400, detail="Invalid auth_method. Use 'oauth', 'service_account', or 'token'")
+        
+        # Save Gmail config (credentials will be encrypted)
+        success = save_gmail_config(
+            gmail_email=request.gmail_email,
+            auth_method=request.auth_method,
+            credentials=request.api_key
+        )
+        
+        if not success:
+            raise HTTPException(status_code=500, detail="Failed to save Gmail configuration")
+        
+        # Retrieve and return the saved config (without credentials)
+        config = get_gmail_config(request.gmail_email)
+        if not config:
+            raise HTTPException(status_code=500, detail="Failed to retrieve saved configuration")
+        
+        # Remove sensitive data from response
+        response_data = {
+            "gmail_email": config['gmail_email'],
+            "auth_method": config['auth_method'],
+            "sync_enabled": config['sync_enabled'],
+            "last_sync_time": config['last_sync_time'],
+            "last_sync_status": config['last_sync_status'],
+            "total_synced": config['total_synced']
+        }
+        
+        logger.info(f"Gmail account connected: {request.gmail_email}")
+        
+        return {
+            "status": "success",
+            "message": f"Gmail account '{request.gmail_email}' connected successfully",
+            "data": response_data
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error connecting Gmail account: {e}")
+        raise HTTPException(status_code=500, detail=f"Error: {str(e)}")
+
+
+@router.post("/gmail/sync", response_model=GmailSyncResponse)
+async def gmail_sync(gmail_email: Optional[str] = None, background_tasks: BackgroundTasks = None):
+    """
+    Manually trigger Gmail sync for a specific account or all accounts.
+    
+    Query parameters:
+    - gmail_email (optional): Specific Gmail email to sync. If omitted, syncs all enabled accounts.
+    
+    Returns:
+    {
+        "status": "syncing",
+        "message": "Gmail sync started in background",
+        "data": {
+            "accounts_syncing": 1,
+            "last_sync": "2026-01-24T15:30:00"
+        }
+    }
+    """
+    try:
+        current_time = datetime.now()
+        
+        if gmail_email:
+            # Sync specific account
+            config = get_gmail_config(gmail_email)
+            if not config:
+                raise HTTPException(status_code=404, detail=f"Gmail account '{gmail_email}' not found")
+            
+            # Run sync in background
+            background_tasks.add_task(sync_gmail_account, config)
+            
+            return {
+                "status": "syncing",
+                "message": f"Sync started for {gmail_email}",
+                "data": {
+                    "accounts_syncing": 1,
+                    "last_sync": current_time.isoformat()
+                }
+            }
+        else:
+            # Sync all enabled accounts
+            configs = get_all_gmail_configs(enabled_only=True)
+            if not configs:
+                return {
+                    "status": "success",
+                    "message": "No enabled Gmail accounts to sync",
+                    "data": {
+                        "accounts_syncing": 0,
+                        "last_sync": current_time.isoformat()
+                    }
+                }
+            
+            # Run sync in background
+            background_tasks.add_task(sync_all_gmail_accounts)
+            
+            return {
+                "status": "syncing",
+                "message": f"Sync started for {len(configs)} account(s)",
+                "data": {
+                    "accounts_syncing": len(configs),
+                    "last_sync": current_time.isoformat()
+                }
+            }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error triggering Gmail sync: {e}")
+        raise HTTPException(status_code=500, detail=f"Error: {str(e)}")
+
+
+@router.get("/gmail/accounts", response_model=APIResponse)
+def gmail_accounts():
+    """
+    Get list of all connected Gmail accounts and their sync status.
+    
+    Returns:
+    {
+        "status": "success",
+        "data": {
+            "accounts": [
+                {
+                    "gmail_email": "user@gmail.com",
+                    "auth_method": "token",
+                    "sync_enabled": true,
+                    "last_sync_time": "2026-01-24T15:30:00",
+                    "last_sync_status": "success",
+                    "total_synced": 42
+                }
+            ],
+            "stats": {
+                "total_accounts": 1,
+                "enabled_accounts": 1,
+                "successful_syncs": 5,
+                "total_emails_synced": 42
+            }
+        }
+    }
+    """
+    try:
+        accounts = get_all_gmail_configs(enabled_only=False)
+        stats = get_gmail_config_stats()
+        
+        # Remove sensitive data
+        safe_accounts = []
+        for account in accounts:
+            safe_accounts.append({
+                "gmail_email": account['gmail_email'],
+                "auth_method": account['auth_method'],
+                "sync_enabled": account['sync_enabled'],
+                "last_sync_time": account['last_sync_time'],
+                "last_sync_status": account['last_sync_status'],
+                "last_sync_error": account['last_sync_error'],
+                "total_synced": account['total_synced']
+            })
+        
+        return {
+            "status": "success",
+            "message": "Retrieved Gmail accounts",
+            "data": {
+                "accounts": safe_accounts,
+                "stats": stats
+            }
+        }
+        
+    except Exception as e:
+        logger.error(f"Error retrieving Gmail accounts: {e}")
+        raise HTTPException(status_code=500, detail=f"Error: {str(e)}")
+
+
+@router.post("/gmail/toggle", response_model=APIResponse)
+def gmail_toggle(gmail_email: str, enabled: bool):
+    """
+    Enable or disable sync for a Gmail account.
+    
+    Query parameters:
+    - gmail_email: Gmail email address
+    - enabled: true/false
+    
+    Returns:
+    {
+        "status": "success",
+        "message": "Sync toggled for user@gmail.com",
+        "data": {
+            "gmail_email": "user@gmail.com",
+            "sync_enabled": true
+        }
+    }
+    """
+    try:
+        # Verify account exists
+        config = get_gmail_config(gmail_email)
+        if not config:
+            raise HTTPException(status_code=404, detail=f"Gmail account '{gmail_email}' not found")
+        
+        # Toggle sync
+        success = toggle_gmail_sync(gmail_email, enabled)
+        if not success:
+            raise HTTPException(status_code=500, detail="Failed to update sync status")
+        
+        return {
+            "status": "success",
+            "message": f"Sync {'enabled' if enabled else 'disabled'} for {gmail_email}",
+            "data": {
+                "gmail_email": gmail_email,
+                "sync_enabled": enabled
+            }
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error toggling Gmail sync: {e}")
+        raise HTTPException(status_code=500, detail=f"Error: {str(e)}")
+
+
+@router.delete("/gmail/disconnect", response_model=APIResponse)
+def gmail_disconnect(gmail_email: str):
+    """
+    Disconnect and remove a Gmail account configuration.
+    
+    Query parameters:
+    - gmail_email: Gmail email address to disconnect
+    
+    Returns:
+    {
+        "status": "success",
+        "message": "Gmail account disconnected"
+    }
+    """
+    try:
+        # Verify account exists
+        config = get_gmail_config(gmail_email)
+        if not config:
+            raise HTTPException(status_code=404, detail=f"Gmail account '{gmail_email}' not found")
+        
+        # Delete config
+        success = delete_gmail_config(gmail_email)
+        if not success:
+            raise HTTPException(status_code=500, detail="Failed to delete Gmail configuration")
+        
+        logger.info(f"Gmail account disconnected: {gmail_email}")
+        
+        return {
+            "status": "success",
+            "message": f"Gmail account '{gmail_email}' disconnected successfully"
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error disconnecting Gmail account: {e}")
+        raise HTTPException(status_code=500, detail=f"Error: {str(e)}")
