@@ -176,7 +176,7 @@ def export_csv():
         writer = csv.writer(output)
         
         # Header
-        writer.writerow(['ID', 'Sender', 'Subject', 'Received At', 'Status', 'Intent', 'Confidence', 'Sentiment', 'Summary', 'Redacted Body'])
+        writer.writerow(['ID', 'Sender', 'Subject', 'Received At', 'Status', 'Intent', 'Confidence', 'Sentiment', 'Summary', 'Generated Reply', 'Redacted Body'])
         
         for email in emails_data:
             analysis = {}
@@ -199,6 +199,7 @@ def export_csv():
                 analysis.get('confidence', 'N/A'),
                 analysis.get('sentiment', ''),
                 summary,
+                email.get('generated_reply', ''),
                 email['body_redacted']
             ])
             

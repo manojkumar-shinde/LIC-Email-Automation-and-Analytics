@@ -55,6 +55,7 @@ def init_db():
                 body_redacted TEXT,
                 analysis TEXT, -- JSON String
                 suggested_action TEXT,
+                generated_reply TEXT,
                 status TEXT DEFAULT 'PENDING', -- PENDING, PROCESSING, COMPLETED, FAILED
                 received_at DATETIME,
                 ingested_at DATETIME,
@@ -72,6 +73,13 @@ def init_db():
         except sqlite3.OperationalError:
             logger.info("Migrating database: Adding processing_started_at column")
             c.execute("ALTER TABLE emails ADD COLUMN processing_started_at DATETIME")
+
+        # Schema Migration: Ensure generated_reply exists
+        try:
+            c.execute("SELECT generated_reply FROM emails LIMIT 1")
+        except sqlite3.OperationalError:
+            logger.info("Migrating database: Adding generated_reply column")
+            c.execute("ALTER TABLE emails ADD COLUMN generated_reply TEXT")
 
 def save_email(google_id: str, sender: str, subject: str, body: str, received_at: datetime) -> bool:
     """Save a new email to the database. Returns True if saved, False if duplicate."""
@@ -167,13 +175,13 @@ def claim_next_pending_email() -> Optional[Dict[str, Any]]:
     finally:
         conn.close()
 
-def update_email_analysis(email_id: int, redacted_body: str, analysis: Dict[str, Any], suggested_action: str, status: str = 'COMPLETED'):
+def update_email_analysis(email_id: int, redacted_body: str, analysis: Dict[str, Any], suggested_action: str, generated_reply: str = None, status: str = 'COMPLETED'):
     with get_db_cursor(commit=True) as c:
         c.execute('''
             UPDATE emails 
-            SET body_redacted = ?, analysis = ?, suggested_action = ?, status = ?, processed_at = ?
+            SET body_redacted = ?, analysis = ?, suggested_action = ?, generated_reply = ?, status = ?, processed_at = ?
             WHERE id = ?
-        ''', (redacted_body, json.dumps(analysis), suggested_action, status, datetime.now(), email_id))
+        ''', (redacted_body, json.dumps(analysis), suggested_action, generated_reply, status, datetime.now(), email_id))
 
 def get_stats() -> Dict[str, Any]:
     with get_db_cursor() as c:
