@@ -19,12 +19,20 @@ const Dashboard = () => {
 
     const fetchData = async () => {
         try {
+<<<<<<< HEAD
             const statsRes = await fetch('http://localhost:8001/api/stats');
+=======
+            const statsRes = await fetch('/api/stats');
+>>>>>>> 0f7d90e76912895e1b59ef053aa7c570ab758f6f
             const statsData = await statsRes.json();
             setStats(statsData);
 
             // Fetch with pagination
+<<<<<<< HEAD
             const emailsRes = await fetch(`http://localhost:8001/api/emails?page=${currentPage}&limit=${pageSize}`);
+=======
+            const emailsRes = await fetch(`/api/emails?page=${currentPage}&limit=${pageSize}`);
+>>>>>>> 0f7d90e76912895e1b59ef053aa7c570ab758f6f
             const emailsResponse = await emailsRes.json();
 
             setEmails(emailsResponse.items || []);
@@ -39,7 +47,11 @@ const Dashboard = () => {
 
     const handleInject = async (data) => {
         try {
+<<<<<<< HEAD
             await fetch('http://localhost:8001/api/ingest', {
+=======
+            await fetch('/api/ingest', {
+>>>>>>> 0f7d90e76912895e1b59ef053aa7c570ab758f6f
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify(data)
@@ -55,7 +67,11 @@ const Dashboard = () => {
             const formData = new FormData();
             formData.append('file', file);
 
+<<<<<<< HEAD
             await fetch('http://localhost:8001/api/ingest/bulk', {
+=======
+            await fetch('/api/ingest/bulk', {
+>>>>>>> 0f7d90e76912895e1b59ef053aa7c570ab758f6f
                 method: 'POST',
                 body: formData
             });

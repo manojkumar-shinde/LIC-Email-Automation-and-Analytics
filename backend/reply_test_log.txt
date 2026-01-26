@@ -1,0 +1,83 @@
+
+==================== Valid Low Priority Enquiry ====================
+INPUT:
+  Priority: LOW
+  Intent: GENERAL_ENQUIRY
+  Email Body: Subject: General Query about Plans
+Hello,
+I am writing to enquire about the new term insurance plans available. Could you please share some information?
+Thanks,
+User
+----------------------------------------
+OUTPUT:
+NO_REPLY
+==================================================
+
+==================== Valid Medium Priority Request ====================
+INPUT:
+  Priority: MEDIUM
+  Intent: REQUEST
+  Email Body: Subject: Difficulty Logging In
+Hi Support,
+I am unable to login to the portal. It says invalid credentials even though I reset my password. Please assist.
+Regards
+----------------------------------------
+OUTPUT:
+NO_REPLY
+==================================================
+
+==================== Valid Low Priority Enquiry ====================
+INPUT:
+  Priority: LOW
+  Intent: GENERAL_ENQUIRY
+  Email Body: Subject: General Query about Plans
+Hello,
+I am writing to enquire about the new term insurance plans available. Could you please share some information?
+Thanks,
+User
+----------------------------------------
+OUTPUT:
+NO_REPLY
+==================================================
+
+==================== Valid Medium Priority Request ====================
+INPUT:
+  Priority: MEDIUM
+  Intent: REQUEST
+  Email Body: Subject: Difficulty Logging In
+Hi Support,
+I am unable to login to the portal. It says invalid credentials even though I reset my password. Please assist.
+Regards
+----------------------------------------
+OUTPUT:
+NO_REPLY
+==================================================
+
+==================== Valid Low Priority Enquiry ====================
+INPUT:
+  Priority: LOW
+  Intent: GENERAL_ENQUIRY
+  Email Body: Subject: General Query about Plans
+Hello,
+I am writing to enquire about the new term insurance plans available. Could you please share some information?
+Thanks,
+User
+----------------------------------------
+OUTPUT:
+Thank you for contacting LIC. 
+We have received your message and it has been noted for review.
+==================================================
+
+==================== Valid Medium Priority Request ====================
+INPUT:
+  Priority: MEDIUM
+  Intent: REQUEST
+  Email Body: Subject: Difficulty Logging In
+Hi Support,
+I am unable to login to the portal. It says invalid credentials even though I reset my password. Please assist.
+Regards
+----------------------------------------
+OUTPUT:
+Thank you for contacting LIC. 
+We have received your message and it has been noted for review.
+==================================================

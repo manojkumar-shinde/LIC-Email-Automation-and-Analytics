@@ -3,7 +3,7 @@ import { Download } from 'lucide-react';
 
 const ExportButton = () => {
     const handleDownload = () => {
-        window.open('http://localhost:8000/api/export', '_blank');
+        window.open('/api/export', '_blank');
     };
 
     return (

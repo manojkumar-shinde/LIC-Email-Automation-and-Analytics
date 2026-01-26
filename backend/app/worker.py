@@ -12,11 +12,22 @@ from app.database import (
 from app.privacy import redact_pii
 from app.brain import analyze_email
 from app.priority import compute_priority
+<<<<<<< HEAD
 from app.gmail_fetcher import GmailAuthenticator, GmailFetcher
+=======
+from app.reply import generate_reply
+>>>>>>> 0f7d90e76912895e1b59ef053aa7c570ab758f6f
 
 # Setup Logging
 logger = logging.getLogger("Worker")
-logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+logging.basicConfig(
+    level=logging.INFO, 
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+    handlers=[
+        logging.FileHandler("app.log"),
+        logging.StreamHandler()
+    ]
+)
 
 def process_email() -> bool:
     """
@@ -58,7 +69,15 @@ def process_email() -> bool:
         
         logger.info(f"Email {email['id']} - Priority: {priority} ({priority_reason})")
         
-        # Step 4: Save results
+        # Step 4: Auto-Reply Generation
+        generated_reply = generate_reply(
+            email_body=redacted_body,
+            intent=analysis_result.get('intent', ''),
+            priority=priority,
+            confidence=analysis_result.get('confidence', 'Low')
+        )
+        
+        # Step 5: Save results
         # Mapping new schema (summary, confidence) to DB columns
         # We store 'summary' in 'suggested_action' column to reuse existing schema
         summary = analysis_result.get('summary', 'No summary provided.')
@@ -68,6 +87,7 @@ def process_email() -> bool:
             redacted_body=redacted_body,
             analysis=analysis_result, # Stores full JSON (intent, sentiment, summary, confidence, priority)
             suggested_action=summary, # Storing summary here for frontend compatibility
+            generated_reply=generated_reply,
             status='COMPLETED'
         )
         logger.info(f"Email {email['id']} completed. Intent: {analysis_result.get('intent')}")
