@@ -4,8 +4,8 @@ import EmailTile from './EmailTile';
 
 const RecentEmails = ({ emails, currentPage, totalPages, onPageChange }) => {
     return (
-        <div className="bg-gray-800 rounded-xl border border-gray-700 overflow-hidden">
-            <div className="p-6 border-b border-gray-700">
+        <div className="tile-transparent rounded-xl overflow-hidden">
+            <div className="p-6 border-b border-gray-600 border-opacity-30">
                 <h2 className="text-xl font-bold flex items-center">
                     <FileText className="w-5 h-5 mr-2 text-indigo-400" />
                     Live Feed
@@ -28,7 +28,7 @@ const RecentEmails = ({ emails, currentPage, totalPages, onPageChange }) => {
             </div>
 
             {/* Pagination Footer - Unchanged */}
-            <div className="p-4 border-t border-gray-700 flex justify-between items-center bg-gray-900/50">
+            <div className="p-4 border-t border-gray-600 border-opacity-30 flex justify-between items-center">
                 <button
                     onClick={() => onPageChange(currentPage - 1)}
                     disabled={currentPage === 1}

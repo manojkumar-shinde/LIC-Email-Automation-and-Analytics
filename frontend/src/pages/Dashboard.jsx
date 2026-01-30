@@ -74,11 +74,22 @@ const Dashboard = () => {
     return (
         <div className="p-8 max-w-[1600px] mx-auto">
             <div className="flex justify-between items-center mb-8">
-                <div>
-                    <h1 className="text-3xl font-bold bg-clip-text text-transparent bg-gradient-to-r from-blue-400 to-pink-500">
-                        LIC Email Intelligence Platform
-                    </h1>
-                    <p className="text-gray-400 mt-1">Real-time Claims & Policy Analysis Agent</p>
+                <div className="flex items-center gap-4">
+                    <img 
+                        src="/lic-logo-bg.png" 
+                        alt="LIC Logo" 
+                        className="h-20 w-20 object-cover flex-shrink-0"
+                        style={{
+                            filter: 'brightness(0.9) contrast(1.2) invert(1) hue-rotate(180deg) saturate(1.5)',
+                            mixBlendMode: 'lighten'
+                        }}
+                    />
+                    <div>
+                        <h1 className="text-3xl font-bold bg-clip-text text-transparent bg-gradient-to-r from-blue-400 to-pink-500">
+                            LIC Email Intelligence Platform
+                        </h1>
+                        <p className="text-gray-400 mt-1">Real-time Claims & Policy Analysis Agent</p>
+                    </div>
                 </div>
                 <ExportButton />
             </div>

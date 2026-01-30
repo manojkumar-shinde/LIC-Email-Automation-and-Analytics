@@ -2,13 +2,13 @@ import React from 'react';
 import { Mail, CheckCircle, AlertTriangle, Clock } from 'lucide-react';
 
 const StatCard = ({ icon: Icon, label, value, color }) => (
-    <div className="bg-gray-800 p-6 rounded-xl border border-gray-700 shadow-lg flex items-center space-x-4">
-        <div className={`p-3 rounded-full bg-opacity-20 ${color}`}>
+    <div className="tile-transparent p-6 rounded-xl shadow-lg flex items-center space-x-4 group">
+        <div className={`p-3 rounded-full bg-opacity-20 ${color} group-hover:bg-opacity-30 transition-all`}>
             <Icon className={`w-8 h-8 ${color.replace('bg-', 'text-')}`} />
         </div>
         <div>
-            <p className="text-gray-400 text-sm">{label}</p>
-            <p className="text-2xl font-bold">{value}</p>
+            <p className="text-blue-300 text-sm font-medium">{label}</p>
+            <p className="text-3xl font-bold text-white">{value}</p>
         </div>
     </div>
 );
@@ -20,25 +20,25 @@ const StatsGrid = ({ stats }) => {
                 icon={Mail}
                 label="Pending Emails"
                 value={stats.pending || 0}
-                color="bg-blue-500 text-blue-500"
+                color="bg-blue-500 text-blue-400"
             />
             <StatCard
                 icon={Clock}
                 label="Avg Processing (s)"
                 value={stats.avg_latency || 0}
-                color="bg-yellow-500 text-yellow-500"
+                color="bg-amber-500 text-amber-400"
             />
             <StatCard
                 icon={CheckCircle}
                 label="Completed"
                 value={stats.completed || 0}
-                color="bg-green-500 text-green-500"
+                color="bg-emerald-500 text-emerald-400"
             />
             <StatCard
                 icon={AlertTriangle}
                 label="Failed"
                 value={stats.failed || 0}
-                color="bg-red-500 text-red-500"
+                color="bg-rose-500 text-rose-400"
             />
         </div>
     );
