@@ -23,7 +23,7 @@ logger = logging.getLogger("Ingestor")
 
 # Config
 # Ideally from env vars
-POLL_INTERVAL = 10
+POLL_INTERVAL = 30
 SCOPES = ['https://www.googleapis.com/auth/gmail.modify']
 CREDENTIALS_FILE = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'credentials.json')
 TOKEN_FILE = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'token.pickle')

@@ -71,7 +71,8 @@ def process_email() -> bool:
             email_body=redacted_body,
             intent=analysis_result.get('intent', ''),
             priority=priority,
-            confidence=analysis_result.get('confidence', 'Low')
+            confidence=analysis_result.get('confidence', 'Low'),
+            sentiment=analysis_result.get('sentiment', 'NEUTRAL')
         )
         
         # Step 5: Save results
@@ -135,7 +136,7 @@ def sync_gmail_account(gmail_config: dict) -> bool:
         authenticator = GmailAuthenticator()
         
         if auth_method == 'oauth':
-            service = authenticator.authenticate_oauth()
+            service = authenticator.authenticate_with_oauth_json(credentials, gmail_email)
         elif auth_method == 'service_account':
             service = authenticator.authenticate_service_account(credentials)
         elif auth_method == 'token':

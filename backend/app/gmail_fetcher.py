@@ -30,7 +30,10 @@ except ImportError:
 logger = logging.getLogger("GmailFetcher")
 
 # Gmail API scope
-SCOPES = ['https://www.googleapis.com/auth/gmail.readonly']
+SCOPES = [
+    'https://www.googleapis.com/auth/gmail.modify',
+    'https://www.googleapis.com/auth/gmail.readonly'
+]
 
 class GmailAuthenticator:
     """Handle Gmail API authentication (OAuth 2.0 and Service Account)"""
@@ -143,6 +146,90 @@ class GmailAuthenticator:
         except Exception as e:
             logger.error(f"Token authentication failed: {e}")
             raise
+    
+    def authenticate_with_oauth_json(self, creds_json: str, gmail_email: str) -> Any:
+        """
+        Authenticate using OAuth credentials JSON (with refresh token support).
+        Automatically refreshes expired tokens.
+        
+        Args:
+            creds_json: JSON string containing OAuth credentials
+            gmail_email: Gmail account email (for database updates)
+            
+        Returns:
+            Gmail service object
+        """
+        try:
+            import json
+            from google.oauth2.credentials import Credentials
+            from google.auth.transport.requests import Request
+            from datetime import datetime
+            import sqlite3
+            import os
+            
+            # Parse credentials JSON
+            creds_dict = json.loads(creds_json)
+            
+            # Create Credentials object
+            creds = Credentials(
+                token=creds_dict.get('token'),
+                refresh_token=creds_dict.get('refresh_token'),
+                token_uri=creds_dict.get('token_uri'),
+                client_id=creds_dict.get('client_id'),
+                client_secret=creds_dict.get('client_secret'),
+                scopes=creds_dict.get('scopes')
+            )
+            
+            # Set expiry if available
+            if creds_dict.get('expiry'):
+                from datetime import datetime
+                creds.expiry = datetime.fromisoformat(creds_dict['expiry'])
+            
+            # Check if token needs refresh
+            if creds.expired and creds.refresh_token:
+                logger.info(f"Access token expired for {gmail_email}, refreshing...")
+                creds.refresh(Request())
+                logger.info(f"Token refreshed successfully for {gmail_email}")
+                
+                # Update database with new tokens
+                updated_creds = {
+                    "token": creds.token,
+                    "refresh_token": creds.refresh_token,
+                    "token_uri": creds.token_uri,
+                    "client_id": creds.client_id,
+                    "client_secret": creds.client_secret,
+                    "scopes": creds.scopes,
+                    "expiry": creds.expiry.isoformat() if creds.expiry else None
+                }
+                
+                # Save refreshed credentials back to database
+                from app.database import save_gmail_config
+                save_gmail_config(gmail_email, 'oauth', json.dumps(updated_creds))
+                
+                # Update token_expiry column
+                db_path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "data", "emails.db")
+                conn = sqlite3.connect(db_path)
+                try:
+                    conn.execute("""
+                        UPDATE gmail_config 
+                        SET token_expiry = ?
+                        WHERE gmail_email = ?
+                    """, (creds.expiry.isoformat() if creds.expiry else None, gmail_email))
+                    conn.commit()
+                finally:
+                    conn.close()
+                
+                logger.info(f"Updated credentials saved for {gmail_email}")
+            
+            # Build Gmail service
+            self.service = build('gmail', 'v1', credentials=creds)
+            logger.info(f"OAuth authentication successful for {gmail_email}")
+            return self.service
+            
+        except Exception as e:
+            logger.error(f"OAuth authentication failed: {e}")
+            raise
+
 
 
 class GmailFetcher:

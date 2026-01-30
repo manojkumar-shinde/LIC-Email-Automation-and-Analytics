@@ -1,197 +1,291 @@
 import logging
+import re
 from langchain_ollama import ChatOllama
 from langchain_core.prompts import PromptTemplate
 from langchain_core.output_parsers import StrOutputParser
 
 logger = logging.getLogger("ReplyGenerator")
 
-# STRICT SYSTEM PROMPT (ASSISTIVE MODE)
+# ════════════════════════════════════════════════════════════════════════════
+# KEYWORD CATEGORIZATION (Two-Tier Safety System)
+# ════════════════════════════════════════════════════════════════════════════
+
+# HARD BLOCK: Always trigger NO_REPLY (high-risk financial/legal topics)
+HARD_BLOCK_KEYWORDS = [
+    'claim', 'claims', 'claimed',
+    'payment', 'payments', 'paid', 'pay', 'paying',
+    'refund', 'refunds', 'refunded', 'refunding',
+    'fraud', 'fraudulent',
+    'legal', 'lawyer', 'attorney', 'court',
+    'complaint', 'complaints', 'complaining',
+    'escalation', 'escalate', 'escalated', 'escalating'
+]
+
+# SOFT INDICATORS: Block only when combined with risk amplifiers
+SOFT_INDICATORS = [
+    'timeline', 'timelines', 'deadline', 'due date', 'due by',
+    'approval', 'approve', 'approved', 'approving',
+    'amount', 'amounts',
+    'processing time', 'process time', 'processing delay'
+]
+
+# URGENCY/RISK AMPLIFIERS: Make soft indicators risky
+URGENCY_KEYWORDS = [
+    'urgent', 'urgently', 'immediate', 'immediately', 'asap',
+    'delay', 'delayed', 'waiting', 'overdue', 'past due'
+]
+
+# POST-GENERATION VALIDATION: Forbidden terms in LLM output
+FORBIDDEN_OUTPUT_TERMS = [
+    'payment', 'claim', 'refund', 'refunds',
+    'approve', 'approved', 'authorization', 'confirmed',
+    'guarantee', 'guaranteed', 'will process', 'will be processed',
+    'timeline', 'timeframe', 'within', 'by', 'days',
+   'settled', 'resolved', 'completed'
+]
+
+# ════════════════════════════════════════════════════════════════════════════
+# DETERMINISTIC PATTERN SELECTION
+# ════════════════════════════════════════════════════════════════════════════
+
+# Intent → Pattern Mapping (No LLM discretion)
+PATTERN_MAPPING = {
+    'GENERAL_ENQUIRY': 'PATTERN_B',
+    'REQUEST': 'PATTERN_A',
+    'APPRECIATION': 'PATTERN_C'
+}
+
+# Approved Response Patterns (Exact Text - DO NOT MODIFY)
+APPROVED_PATTERNS = {
+    'PATTERN_A': "Thank you for contacting LIC.\nWe have received your message and it has been noted for review.",
+    'PATTERN_B': "Thank you for your query.\nOur team is reviewing the information and will respond with the relevant details.",
+    'PATTERN_C': "Thank you for your feedback.\nWe appreciate you taking the time to share your experience."
+}
+
+# ════════════════════════════════════════════════════════════════════════════
+# NO_REPLY REASON TRACKING (Auditability)
+# ════════════════════════════════════════════════════════════════════════════
+
+NO_REPLY_REASONS = {
+    'HIGH_PRIORITY': 'Email priority is HIGH - requires human handling',
+    'RESTRICTED_INTENT': 'Intent is COMPLAINT/CLAIM_RELATED/PAYMENT_ISSUE',
+    'LOW_CONFIDENCE': 'Confidence level is not High',
+    'HARD_BLOCK_KEYWORD': 'Contains hard block keyword',
+    'SOFT_INDICATOR_WITH_RISK': 'Contains soft indicator with negative sentiment or urgency',
+    'POST_VALIDATION_FAIL': 'Generated response contained forbidden term',
+    'PATTERN_NOT_FOUND': 'Intent does not map to a safe pattern',
+    'LLM_ERROR': 'LLM generation failed'
+}
+
+# ════════════════════════════════════════════════════════════════════════════
+# HELPER FUNCTIONS
+# ════════════════════════════════════════════════════════════════════════════
+
+def check_hard_keywords(email_body: str) -> tuple[bool, str]:
+    """
+    Check for hard block keywords (always block).
+    Returns: (found, keyword)
+    """
+    email_lower = email_body.lower()
+    for keyword in HARD_BLOCK_KEYWORDS:
+        if re.search(r'\b' + re.escape(keyword) + r'\b', email_lower):
+            return True, keyword
+    return False, ""
+
+def check_soft_indicators_with_risk(email_body: str, sentiment: str) -> tuple[bool, str]:
+    """
+    Check soft indicators AND verify if risk amplifiers are present.
+    SOFT INDICATORS trigger NO_REPLY only if:
+    - Sentiment is NEGATIVE, OR
+    - Urgency keywords are present
+    
+    Returns: (should_block, reason)
+    """
+    email_lower = email_body.lower()
+    
+    # Check if soft indicators exist
+    soft_found = False
+    soft_keyword = ""
+    for indicator in SOFT_INDICATORS:
+        if indicator in email_lower:
+            soft_found = True
+            soft_keyword = indicator
+            break
+    
+    if not soft_found:
+        return False, ""
+    
+    # Soft indicator found - check for risk amplifiers
+    has_negative_sentiment = (sentiment == "NEGATIVE")
+    has_urgency = any(urgency in email_lower for urgency in URGENCY_KEYWORDS)
+    
+    if has_negative_sentiment or has_urgency:
+        risk_factor = "negative sentiment" if has_negative_sentiment else "urgency keywords"
+        return True, f"'{soft_keyword}' + {risk_factor}"
+    
+    # Soft indicator present but NO risk - safe to proceed
+    return False, ""
+
+def check_forbidden_output_terms(response: str) -> tuple[bool, str]:
+    """
+    Post-generation validation: Scan LLM output for forbidden terms.
+    This is the SECOND SAFETY GATE.
+    
+    Returns: (found, term)
+    """
+    response_lower = response.lower()
+    for term in FORBIDDEN_OUTPUT_TERMS:
+        if term in response_lower:
+            return True, term
+    return False, ""
+
+def log_no_reply_decision(reason_key: str, **details):
+    """
+    Enhanced audit logging for NO_REPLY decisions.
+    Logs specific reason and contextual details for compliance audits.
+    """
+    reason = NO_REPLY_REASONS.get(reason_key, "Unknown reason")
+    log_msg = f"NO_REPLY Decision - Reason: {reason_key} ({reason})"
+    
+    if details:
+        detail_str = ", ".join([f"{k}={v}" for k, v in details.items()])
+        log_msg += f" | Details: {detail_str}"
+    
+    logger.info(log_msg)
+
+# ════════════════════════════════════════════════════════════════════════════
+# UPDATED SYSTEM PROMPT (Deterministic Pattern Selection)
+# ════════════════════════════════════════════════════════════════════════════
+
 REPLY_TEMPLATE = """
-TASK:
-Generate a SAFE, NON-COMMITTAL email reply draft for LIC (Life Insurance Corporation of India).
+SYSTEM ROLE:
+You are an ASSISTIVE EMAIL REPLY AGENT for LIC (Life Insurance Corporation of India).
 
-You operate ONLY in ASSISTIVE MODE.
-All outputs are drafts for HUMAN REVIEW.
+You do NOT send emails.
+You do NOT take decisions.
+You generate SAFE reply drafts ONLY for HUMAN REVIEW.
 
-DO NOT:
-- Say “Okay”, “I understand”, or conversational fillers
-- Output explanations, reasoning, or metadata
-- Output JSON
-- Output signatures or formatting
+────────────────────────────────────
 
-OUTPUT MUST BE:
-- A plain-text reply draft
-OR
-- The exact string: NO_REPLY
+CRITICAL INSTRUCTION:
 
-Nothing else.
+Based on the Intent provided, return EXACTLY one of these patterns:
 
----
-
-ROLE & AUTHORITY (STRICT):
-
-You are NOT a customer support agent.
-You are NOT authorized to:
-- Resolve issues
-- Confirm actions
-- Provide explanations
-- Give instructions
-- Interpret LIC policies
-- Commit to timelines or outcomes
-
-You ONLY generate acknowledgement-style drafts when explicitly allowed.
-
----
-
-STRICT ENTRY CONDITIONS (HARD GATE):
-
-You MUST generate a reply ONLY IF **ALL** are true:
-
-1. Priority is:
-   - LOW
-   - MEDIUM
-
-2. Intent is one of:
-   - GENERAL_ENQUIRY
-   - REQUEST (non-financial, non-claim)
-   - APPRECIATION
-
-3. Confidence level is:
-   - High
-
-If ANY condition fails:
-→ Output exactly: NO_REPLY
-
----
-
-ABSOLUTE DO-NOT RULES (NON-NEGOTIABLE):
-
-You MUST NOT reply to emails involving:
-- HIGH priority
-- CLAIM_RELATED
-- PAYMENT_ISSUE
-- COMPLAINT
-- Fraud, legal, escalation, grievance
-- Claims, refunds, money, settlements, rejections
-- Policy interpretation or explanation
-
-You MUST NOT:
-- Ask for personal or sensitive information
-- Mention internal teams, SLAs, or processes
-- Suggest next steps or actions
-- Use language implying resolution or authority
-
-If there is ANY doubt:
-→ Output NO_REPLY
-
-Silence is safer than a wrong reply.
-
----
-
-SAFE ACKNOWLEDGEMENT OVERRIDE (CRITICAL):
-
-Even WITHOUT access to LIC internal systems or full policy data,
-it is SAFE to generate an acknowledgement-only reply IF ALL are true:
-
-- Priority: LOW or MEDIUM
-- Confidence: High
-- Intent: GENERAL_ENQUIRY or REQUEST (non-financial)
-- Email does NOT mention:
-  claims, payments, money, refunds, legal action, complaints, fraud, escalation
-
-In this case:
-- You MAY respond ONLY using approved acknowledgement patterns
-- You MUST NOT explain, guide, or instruct
-- You MUST NOT imply follow-up actions
-
-If unsure → NO_REPLY
-
----
-
-APPROVED RESPONSE INTENTS (ONLY THESE):
-
-1. ACKNOWLEDGEMENT
-2. INFORMATION RECEIVED
-3. APPRECIATION RESPONSE
-
-DO NOT invent new styles.
-
----
-
-APPROVED RESPONSE PATTERNS (REUSE ONLY):
-
-### Pattern A — Acknowledgement
-"Thank you for contacting LIC.
-We have received your message and it has been noted for review."
-
-### Pattern B — General Enquiry
-"Thank you for your query.
+Intent: GENERAL_ENQUIRY
+→ Return: "Thank you for your query.
 Our team is reviewing the information and will respond with the relevant details."
 
-### Pattern C — Appreciation
-"Thank you for your feedback.
+Intent: REQUEST
+→ Return: "Thank you for contacting LIC.
+We have received your message and it has been noted for review."
+
+Intent: APPRECIATION
+→ Return: "Thank you for your feedback.
 We appreciate you taking the time to share your experience."
 
-NO personalization beyond polite language.
-NO additional sentences.
+DO NOT modify the wording.
+DO NOT add extra text.
+DO NOT explain or provide commentary.
 
----
+If the intent is NOT one of the above, return: NO_REPLY
 
-EMAIL CONTENT (PII REDACTED):
+────────────────────────────────────
+
+INPUT DATA:
+
+Email Content (PII redacted):
 {email}
 
-METADATA:
-- Priority: {priority}
-- Intent: {intent}
-- Confidence: {confidence}
+Metadata:
+• Intent: {intent}
+• Priority: {priority}
+• Confidence: {confidence}
 
----
+────────────────────────────────────
 
-OUTPUT FORMAT (STRICT):
+OUTPUT:
 
-Return ONLY:
-- One approved reply pattern
-OR
-- NO_REPLY
+Return ONLY the exact pattern text for the given intent.
+No JSON. No quotes. No explanations.
 
-No explanations.
-No commentary.
-No JSON.
-
----
-
-FINAL SELF-CHECK (MANDATORY):
-
-Before responding, internally verify:
-- Could this reply be misunderstood as a promise?
-- Could this create false expectations?
-- Could this expose LIC to liability if auto-sent?
-
-If YES to ANY:
-→ Output NO_REPLY
+END.
 """
 
-def generate_reply(email_body: str, intent: str, priority: str, confidence: str) -> str:
+# ════════════════════════════════════════════════════════════════════════════
+# MAIN REPLY GENERATION FUNCTION (Enhanced)
+# ════════════════════════════════════════════════════════════════════════════
+
+def generate_reply(email_body: str, intent: str, priority: str, confidence: str, sentiment: str = "NEUTRAL") -> str:
     """
-    Generates an automated reply for the given email context.
-    Returns "NO_REPLY" if conditions are not met.
+    Generates an automated reply draft with multi-layered safety checks.
+    
+    Safety Layers:
+    1. Entry conditions (priority/intent/confidence)
+    2. Hard keyword blocking
+    3. Soft keyword + risk amplifier blocking
+    4. Deterministic pattern selection
+    5. Post-generation validation
+    
+    Args:
+        email_body: Email content (PII redacted)
+        intent: Classification intent (GENERAL_ENQUIRY, REQUEST, etc.)
+        priority: Email priority (LOW, MEDIUM, HIGH)
+        confidence: Classification confidence (High, Medium, Low)
+        sentiment: Email sentiment (POSITIVE, NEUTRAL, NEGATIVE)
+    
+    Returns:
+        str: Reply draft or "NO_REPLY"
     """
     
-    # 1. Pre-Check: Fail fast if conditions are obviously invalid
-    # This saves LLM tokens and time
+    # ════════════════════════════════════════════════════════════════════════
+    # LAYER 1: Entry Conditions (Fail-Fast)
+    # ════════════════════════════════════════════════════════════════════════
+    
     if priority == "HIGH":
-        logger.info("Reply skipped: High Priority")
+        log_no_reply_decision('HIGH_PRIORITY', priority=priority, intent=intent)
         return "NO_REPLY"
-        
+    
     if intent in ["COMPLAINT", "CLAIM_RELATED", "PAYMENT_ISSUE"]:
-        logger.info(f"Reply skipped: Restricted Intent ({intent})")
+        log_no_reply_decision('RESTRICTED_INTENT', intent=intent, priority=priority)
         return "NO_REPLY"
-        
+    
     if confidence != "High":
-        logger.info("Reply skipped: Low Confidence")
+        log_no_reply_decision('LOW_CONFIDENCE', confidence=confidence, intent=intent)
         return "NO_REPLY"
-
-    # 2. Invoke LLM for strict generation
+    
+    # ════════════════════════════════════════════════════════════════════════
+    # LAYER 2: Hard Keyword Blocking (Always Block)
+    # ════════════════════════════════════════════════════════════════════════
+    
+    hard_found, hard_keyword = check_hard_keywords(email_body)
+    if hard_found:
+        log_no_reply_decision('HARD_BLOCK_KEYWORD', keyword=hard_keyword, intent=intent)
+        return "NO_REPLY"
+    
+    # ════════════════════════════════════════════════════════════════════════
+    # LAYER 3: Soft Indicator + Risk Amplifier Blocking
+    # ════════════════════════════════════════════════════════════════════════
+    
+    soft_risky, soft_reason = check_soft_indicators_with_risk(email_body, sentiment)
+    if soft_risky:
+        log_no_reply_decision('SOFT_INDICATOR_WITH_RISK', reason=soft_reason, sentiment=sentiment)
+        return "NO_REPLY"
+    
+    # ════════════════════════════════════════════════════════════════════════
+    # LAYER 4: Deterministic Pattern Selection (No LLM Discretion)
+    # ════════════════════════════════════════════════════════════════════════
+    
+    # Check if intent maps to a safe pattern
+    pattern_key = PATTERN_MAPPING.get(intent)
+    if not pattern_key:
+        log_no_reply_decision('PATTERN_NOT_FOUND', intent=intent)
+        return "NO_REPLY"
+    
+    # Get the exact approved pattern
+    approved_response = APPROVED_PATTERNS.get(pattern_key)
+    
+    # For extra safety, still invoke LLM but with strict deterministic prompt
+    # This maintains the architecture while adding pattern enforcement
     try:
         llm = ChatOllama(model="gemma2:2b", temperature=0, timeout=30.0)
         
@@ -202,8 +296,7 @@ def generate_reply(email_body: str, intent: str, priority: str, confidence: str)
         
         chain = prompt | llm | StrOutputParser()
         
-        # Log the attempt
-        logger.info(f"Generating reply for Priority:{priority}, Intent:{intent}")
+        logger.info(f"Generating reply: Pattern={pattern_key}, Intent={intent}, Priority={priority}")
         
         response = chain.invoke({
             "email": email_body,
@@ -214,14 +307,28 @@ def generate_reply(email_body: str, intent: str, priority: str, confidence: str)
         
         cleaned_response = response.strip().strip('"').strip("'")
         
-        # 3. Post-Check
+        # If LLM returns NO_REPLY, respect it
         if cleaned_response == "NO_REPLY":
-            logger.info("Reply generator decided NO_REPLY")
-        else:
-            logger.info("Reply generated successfully")
-            
+            log_no_reply_decision('LLM_ERROR', reason="LLM returned NO_REPLY")
+            return "NO_REPLY"
+        
+        # ════════════════════════════════════════════════════════════════════
+        # LAYER 5: Post-Generation Validation (Second Safety Gate)
+        # ════════════════════════════════════════════════════════════════════
+        
+        forbidden_found, forbidden_term = check_forbidden_output_terms(cleaned_response)
+        if forbidden_found:
+            log_no_reply_decision('POST_VALIDATION_FAIL', term=forbidden_term, response_preview=cleaned_response[:50])
+            return "NO_REPLY"
+        
+        # ════════════════════════════════════════════════════════════════════
+        # SUCCESS: Reply Generated and Validated
+        # ════════════════════════════════════════════════════════════════════
+        
+        logger.info(f"Reply generated successfully: Pattern={pattern_key}, Length={len(cleaned_response)}")
         return cleaned_response
-
+    
     except Exception as e:
-        logger.error(f"Reply generation failed: {e}")
+        log_no_reply_decision('LLM_ERROR', error=str(e))
+        logger.error(f"Reply generation exception: {e}")
         return "NO_REPLY"

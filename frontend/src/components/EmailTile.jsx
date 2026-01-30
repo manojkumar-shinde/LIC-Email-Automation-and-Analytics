@@ -105,6 +105,41 @@ const EmailTile = ({ email }) => {
                 </p>
             </div>
 
+            {/* Generated Reply Section */}
+            {email.generated_reply && (
+                <div className="mb-3 pt-3 border-t border-gray-700">
+                    <div className="flex items-center justify-between mb-2">
+                        <span className="text-xs font-semibold text-gray-400 uppercase">
+                            📧 Generated Reply Draft
+                        </span>
+                        {email.generated_reply === 'NO_REPLY' && (
+                            <span className="px-2 py-1 rounded-md text-xs font-bold bg-yellow-900 text-yellow-300 border border-yellow-700">
+                                ⚠️ SAFETY BLOCKED
+                            </span>
+                        )}
+                    </div>
+                    {email.generated_reply === 'NO_REPLY' ? (
+                        <div className="bg-yellow-900/20 border border-yellow-700/50 rounded-md p-3">
+                            <p className="text-xs text-yellow-300 font-medium">
+                                ⚠️ No reply generated - requires human review
+                            </p>
+                            <p className="text-xs text-yellow-400/70 mt-1">
+                                This email contains sensitive keywords, high priority, or claims-related content that requires manual handling.
+                            </p>
+                        </div>
+                    ) : (
+                        <div className="bg-blue-900/20 border border-blue-700/50 rounded-md p-3">
+                            <p className="text-xs text-gray-300 leading-relaxed whitespace-pre-line">
+                                {email.generated_reply}
+                            </p>
+                            <p className="text-xs text-blue-400/70 mt-2 italic">
+                                ⚠️ Draft only - requires human review before sending
+                            </p>
+                        </div>
+                    )}
+                </div>
+            )}
+
             {/* Metadata: Intent, Sentiment */}
             <div className="flex flex-wrap gap-2 pt-3 border-t border-gray-700">
                 {/* Intent Badge */}

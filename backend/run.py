@@ -29,7 +29,7 @@ def run_api():
     from app.main import app
     _log_startup("DEBUG: API Process Starting...")
     sys.stdout.flush()
-    uvicorn.run(app, host="0.0.0.0", port=8001, reload=False)
+    uvicorn.run(app, host="127.0.0.1", port=8001, reload=False)
 
 def run_ingestor():
     from app import ingestor
@@ -66,12 +66,12 @@ if __name__ == "__main__":
     
     # Create processes
     p_api = multiprocessing.Process(target=run_api, name="API_Server")
-    # p_ingestor = multiprocessing.Process(target=run_ingestor, name="Ingestor")
+    # p_ingestor = multiprocessing.Process(target=run_ingestor, name="Ingestor")  # Disabled - causing startup issues
     p_worker = multiprocessing.Process(target=run_worker, name="Worker")
 
     # Start processes
     p_api.start()
-    # p_ingestor.start() # Disabled per user request
+    # p_ingestor.start()  # Disabled
     p_worker.start()
 
     try:

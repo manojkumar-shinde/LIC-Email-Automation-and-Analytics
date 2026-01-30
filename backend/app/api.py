@@ -3,11 +3,15 @@ import io
 import uuid
 import json
 import logging
-from datetime import datetime
+import os
+from datetime import datetime, timedelta
 from typing import List, Optional
 from fastapi import APIRouter, HTTPException, BackgroundTasks, UploadFile, File
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
+from google_auth_oauthlib.flow import Flow
+from google.auth.transport.requests import Request
+from google.oauth2.credentials import Credentials
 
 from app.database import (
     get_stats, 
@@ -527,3 +531,183 @@ def gmail_disconnect(gmail_email: str):
     except Exception as e:
         logger.error(f"Error disconnecting Gmail account: {e}")
         raise HTTPException(status_code=500, detail=f"Error: {str(e)}")
+
+
+# ============================================================================
+# GMAIL OAUTH 2.0 ENDPOINTS
+# ============================================================================
+
+# OAuth configuration
+SCOPES = [
+    'https://www.googleapis.com/auth/gmail.modify',
+    'https://www.googleapis.com/auth/gmail.readonly'
+]
+CREDENTIALS_FILE = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'credentials.json')
+REDIRECT_URI = 'urn:ietf:wg:oauth:2.0:oob'  # For installed apps
+
+
+@router.get("/gmail/oauth/authorize")
+def gmail_oauth_authorize(gmail_email: str):
+    """
+    Start OAuth 2.0 authorization flow for Gmail.
+    
+    Query parameters:
+    - gmail_email: Gmail account email address to connect
+    
+    Returns authorization URL for user to visit.
+    
+    Returns:
+    {
+        "status": "success",
+        "message": "Visit authorization URL",
+        "data": {
+            "auth_url": "https://accounts.google.com/o/oauth2/auth?..."
+        }
+    }
+    """
+    try:
+        if not os.path.exists(CREDENTIALS_FILE):
+            raise HTTPException(
+                status_code=500, 
+                detail=f"OAuth credentials file not found at {CREDENTIALS_FILE}. Please add credentials.json"
+            )
+        
+        # Create OAuth flow
+        flow = Flow.from_client_secrets_file(
+            CREDENTIALS_FILE,
+            scopes=SCOPES,
+            redirect_uri=REDIRECT_URI
+        )
+        
+        # Generate authorization URL
+        auth_url, _ = flow.authorization_url(
+            access_type='offline',
+            include_granted_scopes='true',
+            prompt='consent',  # Force consent to get refresh_token
+            login_hint=gmail_email
+        )
+        
+        logger.info(f"Generated OAuth URL for {gmail_email}")
+        
+        return {
+            "status": "success",
+            "message": f"Visit the authorization URL to grant access for {gmail_email}",
+            "data": {
+                "auth_url": auth_url,
+                "gmail_email": gmail_email,
+                "instructions": "1. Visit the auth_url, 2. Authorize the app, 3. Copy the authorization code, 4. Call /gmail/oauth/callback with the code"
+            }
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error generating OAuth URL: {e}")
+        raise HTTPException(status_code=500, detail=f"OAuth error: {str(e)}")
+
+
+class OAuthCallbackRequest(BaseModel):
+    gmail_email: str = Field(..., description="Gmail account email address")
+    auth_code: str = Field(..., description="Authorization code from OAuth redirect")
+
+
+@router.post("/gmail/oauth/callback")
+def gmail_oauth_callback(request: OAuthCallbackRequest):
+    """
+    Complete OAuth 2.0 flow by exchanging authorization code for tokens.
+    
+    Request body:
+    {
+        "gmail_email": "user@gmail.com",
+        "auth_code": "4/0AfJohXk..."
+    }
+    
+    Returns:
+    {
+        "status": "success",
+        "message": "Gmail account connected successfully with OAuth",
+        "data": {
+            "gmail_email": "user@gmail.com",
+            "has_refresh_token": true,
+            "token_expires_at": "2024-01-28T10:30:00"
+        }
+    }
+    """
+    try:
+        if not os.path.exists(CREDENTIALS_FILE):
+            raise HTTPException(
+                status_code=500,
+                detail="OAuth credentials file not found"
+            )
+        
+        # Create OAuth flow
+        flow = Flow.from_client_secrets_file(
+            CREDENTIALS_FILE,
+            scopes=SCOPES,
+            redirect_uri=REDIRECT_URI
+        )
+        
+        # Exchange authorization code for tokens
+        flow.fetch_token(code=request.auth_code)
+        
+        # Get credentials object
+        creds = flow.credentials
+        
+        if not creds:
+            raise HTTPException(status_code=500, detail="Failed to obtain credentials")
+        
+        # Build credentials JSON with refresh token
+        creds_dict = {
+            "token": creds.token,
+            "refresh_token": creds.refresh_token,
+            "token_uri": creds.token_uri,
+            "client_id": creds.client_id,
+            "client_secret": creds.client_secret,
+            "scopes": creds.scopes,
+            "expiry": creds.expiry.isoformat() if creds.expiry else None
+        }
+        
+        # Save to database (credentials stored as encrypted JSON)
+        success = save_gmail_config(
+            gmail_email=request.gmail_email,
+            auth_method='oauth',
+            credentials=json.dumps(creds_dict)
+        )
+        
+        if not success:
+            raise HTTPException(status_code=500, detail="Failed to save Gmail configuration")
+        
+        logger.info(f"OAuth tokens saved for {request.gmail_email}")
+        
+        # Update database with refresh token and expiry separately
+        import sqlite3
+        db_path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "data", "emails.db")
+        conn = sqlite3.connect(db_path)
+        try:
+            conn.execute("""
+                UPDATE gmail_config 
+                SET refresh_token = ?, token_expiry = ?
+                WHERE gmail_email = ?
+            """, (creds.refresh_token, creds.expiry.isoformat() if creds.expiry else None, request.gmail_email))
+            conn.commit()
+        finally:
+            conn.close()
+        
+        return {
+            "status": "success",
+            "message": f"Gmail account '{request.gmail_email}' connected successfully with OAuth",
+            "data": {
+                "gmail_email": request.gmail_email,
+                "auth_method": "oauth",
+                "has_refresh_token": bool(creds.refresh_token),
+                "token_expires_at": creds.expiry.isoformat() if creds.expiry else None,
+                "scopes": creds.scopes
+            }
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"OAuth callback error: {e}")
+        raise HTTPException(status_code=500, detail=f"OAuth error: {str(e)}")
+
